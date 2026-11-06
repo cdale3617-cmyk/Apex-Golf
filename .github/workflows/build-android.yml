@@ -1,0 +1,63 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install packages
+        run: npm install --no-audit --no-fund
+
+      - name: Check the code and build the web app
+        run: npm run build
+
+      - name: Create the Android project
+        run: npx cap add android
+
+      - name: Allow location, microphone and internet
+        run: python3 scripts/patch_manifest.py
+
+      - name: Copy the web app into Android
+        run: npx cap sync android
+
+      - name: Build the APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Keep the APK with this run
+        uses: actions/upload-artifact@v4
+        with:
+          name: APEX-Golf-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Publish the APK on the Releases page
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk APEX-Golf.apk
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest APEX-Golf.apk --title "APEX Golf (latest build)" --notes "Download APEX-Golf.apk on your Android phone and open it to install." --target main
