@@ -1,0 +1,7 @@
+{
+  "appId": "com.apexgolf.caddie",
+  "appName": "APEX Golf",
+  "webDir": "dist",
+  "server": { "androidScheme": "https" },
+  "android": { "allowMixedContent": false }
+}
