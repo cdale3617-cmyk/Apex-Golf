@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Flag, Mountain, PanelRight, Pencil, RefreshCw, Search, Thermometer, Wind } from "lucide-react";
 import type { Tab } from "../App";
 import { advise, clubStats } from "../caddie";
-import { refreshWeather } from "../courses";
+import { redrawCourse, refreshWeather } from "../courses";
 import { actions, useData, type Hole, type Round } from "../store";
 import { useUnits } from "../units";
 import { Button, Empty, Panel, Select, toast } from "../ui";
@@ -92,6 +92,17 @@ export default function Play({ go }: { go: (t: Tab) => void }) {
   useEffect(() => {
     if (course) void refreshWeather(course.id);
   }, [course?.id]);
+
+  // Courses saved before holes were drawn get their real hole shapes, once per launch.
+  const tried = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!course || course.lat === null || tried.current.has(course.id)) return;
+    if (holes.length === 0 || holes.every((h) => h.shape)) return;
+    tried.current.add(course.id);
+    void redrawCourse(course.id).then((ok) => {
+      if (ok) toast("Drew the real holes from the map.");
+    });
+  }, [course?.id, holes.length]);
 
   // Open on the first hole not scored yet, once, when a round is under way.
   useEffect(() => {

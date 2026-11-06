@@ -1,4 +1,4 @@
-import { actions, getState, type Hole } from "./store";
+import { actions, getState, type Hole, type Shape, type XY } from "./store";
 import { COMPASS, bearing, metres, type Dir, type Pt } from "./geo";
 
 // Courses come from OpenStreetMap (search and hole maps) and Open-Meteo (weather and height).
@@ -8,7 +8,7 @@ export type Hit = { id: string; name: string; location: string; lat: number; lon
 type Way = { tags?: Record<string, string>; geometry?: Pt[] };
 type Box = { south: number; north: number; west: number; east: number };
 type Nom = { osm_type: string; osm_id: number; lat: string; lon: string; name?: string; display_name: string; category?: string; type?: string; boundingbox: string[] };
-type HoleIn = { number: number; par: number | null; handicap: number | null; lengthM: number; frontM: number; backM: number; teeLat: number; teeLon: number; greenLat: number; greenLon: number; bearing: number };
+type HoleIn = { number: number; par: number | null; handicap: number | null; lengthM: number; frontM: number; backM: number; teeLat: number; teeLon: number; greenLat: number; greenLon: number; bearing: number; shape: Shape };
 
 const MIRRORS = [
   "https://lz4.overpass-api.de/api/interpreter",
@@ -79,7 +79,8 @@ export async function searchCourses(query: string): Promise<Hit[]> {
 
 async function mapData(hit: Hit): Promise<Way[]> {
   const box = hit.south + "," + hit.west + "," + hit.north + "," + hit.east;
-  const query = '[out:json][timeout:25];(way["golf"="hole"](' + box + ');way["golf"="green"](' + box + "););out geom tags;";
+  const w = (t: string) => "way[" + t + "](" + box + ");";
+  const query = "[out:json][timeout:30];(" + w('"golf"="hole"') + w('"golf"="green"') + w('"golf"="fairway"') + w('"golf"="bunker"') + w('"golf"="water_hazard"') + w('"golf"="lateral_water_hazard"') + w('"natural"="water"') + ");out geom tags;";
   // Ask every mirror at once and take the first good answer: any one of them can be busy.
   const controllers = MIRRORS.map(() => new AbortController());
   const timer = setTimeout(() => controllers.forEach((c) => c.abort()), 40000);
@@ -118,12 +119,14 @@ function buildHoles(elements: Way[]): HoleIn[] {
     let front = length - 12;
     let back = length + 12;
     let best = 80;
+    let greenRing: Pt[] | null = null;
     greens.forEach((gr) => {
       const ring = gr.geometry as Pt[];
       const centre = { lat: ring.reduce((s, p) => s + p.lat, 0) / ring.length, lon: ring.reduce((s, p) => s + p.lon, 0) / ring.length };
       const d = metres(end, centre);
       if (d < best) {
         best = d;
+        greenRing = ring;
         const fromTee = ring.map((p) => metres(tee, p));
         const toCentre = metres(tee, centre);
         front = length + (Math.min(...fromTee) - toCentre);
@@ -135,7 +138,7 @@ function buildHoles(elements: Way[]): HoleIn[] {
     const next: HoleIn = {
       number, par: Number.isFinite(par) ? par : null, handicap: Number.isFinite(handicap) ? handicap : null,
       lengthM: length, frontM: Math.max(1, front), backM: back,
-      teeLat: tee.lat, teeLon: tee.lon, greenLat: end.lat, greenLon: end.lon, bearing: bearing(tee, end),
+      teeLat: tee.lat, teeLon: tee.lon, greenLat: end.lat, greenLon: end.lon, bearing: bearing(tee, end), shape: shapeFor(g, elements, greenRing),
     };
     const have = byNumber.get(number);
     if (!have || have.lengthM < next.lengthM) byNumber.set(number, next);
@@ -179,6 +182,9 @@ export async function importCourse(hit: Hit, progress: (m: string) => void): Pro
     const map: Record<number, number> = {};
     holes.forEach((h) => { map[h.number] = h.bearing; });
     actions.setBearings(existing.id, map);
+    const shapes: Record<number, Shape> = {};
+    holes.forEach((h) => { shapes[h.number] = h.shape; });
+    actions.setShapes(existing.id, shapes, map);
     return existing.id;
   }
   progress("Found " + holes.length + " holes. Checking weather and slope…");
@@ -199,7 +205,7 @@ export async function importCourse(hit: Hit, progress: (m: string) => void): Pro
       par: h.par && h.par >= 3 && h.par <= 6 ? h.par : guessPar(h.lengthM),
       handicap: h.handicap ?? 0,
       centerM: Math.round(h.lengthM), frontM: Math.round(h.frontM), backM: Math.round(h.backM),
-      windKmh: w?.windKmh ?? 0, windDir: w?.windDir ?? "N", tempC: w?.tempC ?? 20, elevationM: rise, bearing: h.bearing,
+      windKmh: w?.windKmh ?? 0, windDir: w?.windDir ?? "N", tempC: w?.tempC ?? 20, elevationM: rise, bearing: h.bearing, shape: h.shape,
     };
   });
   return actions.addCourse({ name: hit.name, location: hit.location, holes: rows.length, par: rows.reduce((s, h) => s + h.par, 0), lat: hit.lat, lon: hit.lon }, rows);
@@ -229,4 +235,82 @@ export async function addManualCourse(name: string, location: string, list: { nu
       windKmh: w?.windKmh ?? 0, windDir: w?.windDir ?? "N", tempC: w?.tempC ?? 20, elevationM: 0, bearing: null,
     }));
   return actions.addCourse({ name: n, location: location.trim(), holes: rows.length, par: rows.reduce((s, h) => s + h.par, 0), lat, lon }, rows);
+}
+
+const segDist = (p: XY, a: XY, b: XY) => {
+  const dx = b[0] - a[0], dy = b[1] - a[1];
+  const l2 = dx * dx + dy * dy;
+  const t = l2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2)) : 0;
+  return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy);
+};
+const pathDist = (p: XY, path: XY[]) => {
+  let m = Infinity;
+  for (let i = 1; i < path.length; i++) m = Math.min(m, segDist(p, path[i - 1], path[i]));
+  return m;
+};
+
+/** The hole and what sits beside it (fairway, bunkers, water, green), turned so the tee is at the bottom and the green straight up. */
+function shapeFor(g: Pt[], elements: Way[], greenRing: Pt[] | null): Shape {
+  const t = g[0];
+  const b = (bearing(t, g[g.length - 1]) * Math.PI) / 180;
+  const kx = Math.cos((t.lat * Math.PI) / 180) * 111320;
+  const local = (p: Pt): XY => {
+    const x = (p.lon - t.lon) * kx;
+    const y = (p.lat - t.lat) * 110540;
+    return [x * Math.cos(b) - y * Math.sin(b), x * Math.sin(b) + y * Math.cos(b)];
+  };
+  const r1 = (p: XY): XY => [Math.round(p[0] * 10) / 10, Math.round(p[1] * 10) / 10];
+  const thin = (pts: XY[], max: number): XY[] => {
+    if (pts.length <= max) return pts.map(r1);
+    const out: XY[] = [];
+    for (let i = 0; i < max; i++) out.push(pts[Math.round((i * (pts.length - 1)) / (max - 1))]);
+    return out.map(r1);
+  };
+  const full = g.map(local);
+  const near = (test: (w: Way) => boolean, d: number, max: number, pts: number): XY[][] =>
+    elements
+      .filter((w) => w.geometry && w.geometry.length > 2 && test(w))
+      .map((w) => {
+        const poly = (w.geometry as Pt[]).map(local);
+        return { poly, d: Math.min(...poly.map((p) => pathDist(p, full))) };
+      })
+      .filter((x) => x.d <= d)
+      .sort((a, z) => a.d - z.d)
+      .slice(0, max)
+      .map((x) => thin(x.poly, pts));
+  const tag = (w: Way, k: string, v: string[]) => v.includes(w.tags?.[k] ?? "");
+  return {
+    path: thin(full, 14),
+    green: greenRing ? thin(greenRing.map(local), 14) : null,
+    fairways: near((w) => tag(w, "golf", ["fairway"]), 30, 4, 22),
+    bunkers: near((w) => tag(w, "golf", ["bunker"]), 60, 10, 12),
+    water: near((w) => tag(w, "golf", ["water_hazard", "lateral_water_hazard"]) || tag(w, "natural", ["water"]), 70, 4, 26),
+  };
+}
+
+/** Courses loaded before holes were drawn: fetch the map again and draw them. Returns true when holes were drawn. */
+export async function redrawCourse(courseId: string): Promise<boolean> {
+  const c = getState().courses.find((x) => x.id === courseId);
+  if (!c || c.lat === null || c.lon === null) return false;
+  try {
+    const pad = 0.015;
+    const hit: Hit = { id: "", name: c.name, location: c.location, lat: c.lat, lon: c.lon, south: c.lat - pad, north: c.lat + pad, west: c.lon - pad * 1.3, east: c.lon + pad * 1.3 };
+    const found = buildHoles(await mapData(hit));
+    const have = getState().holes.filter((h) => h.courseId === courseId);
+    const shapes: Record<number, Shape> = {};
+    const bears: Record<number, number> = {};
+    found.forEach((h) => {
+      const mine = have.find((x) => x.number === h.number);
+      // Only trust a hole that is the same length as the one saved, so a neighbouring course is never mixed in.
+      if (mine && Math.abs(h.lengthM - mine.centerM) / mine.centerM < 0.12) {
+        shapes[h.number] = h.shape;
+        bears[h.number] = h.bearing;
+      }
+    });
+    if (!Object.keys(shapes).length) return false;
+    actions.setShapes(courseId, shapes, bears);
+    return true;
+  } catch {
+    return false;
+  }
 }

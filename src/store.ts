@@ -5,10 +5,13 @@ import type { Dir } from "./geo";
 
 export type ClubType = "Driver" | "Wood" | "Hybrid" | "Iron" | "Wedge" | "Putter";
 export interface Course { id: string; name: string; location: string; holes: number; par: number; lat: number | null; lon: number | null; wxAt: number }
+export type XY = [number, number];
+/** The real outline of a hole, in metres from the tee: right of the line (x) and forward (y). */
+export interface Shape { path: XY[]; green: XY[] | null; fairways: XY[][]; bunkers: XY[][]; water: XY[][] }
 export interface Hole {
   id: string; courseId: string; number: number; par: number; handicap: number;
   centerM: number; frontM: number; backM: number;
-  windKmh: number; windDir: Dir; tempC: number; elevationM: number; bearing: number | null;
+  windKmh: number; windDir: Dir; tempC: number; elevationM: number; bearing: number | null; shape?: Shape | null;
 }
 export interface Club { id: string; name: string; type: ClubType; loft: number; carryM: number; totalM: number }
 export interface Round { id: string; courseId: string; date: string; status: "In progress" | "Complete" }
@@ -95,6 +98,12 @@ export const actions = {
   },
   setBearings(courseId: string, byNumber: Record<number, number>) {
     update((s) => ({ ...s, holes: s.holes.map((h) => (h.courseId === courseId && byNumber[h.number] !== undefined ? { ...h, bearing: byNumber[h.number] } : h)) }));
+  },
+  setShapes(courseId: string, shapes: Record<number, Shape>, bearings: Record<number, number>) {
+    update((s) => ({
+      ...s,
+      holes: s.holes.map((h) => (h.courseId === courseId ? { ...h, shape: shapes[h.number] ?? h.shape ?? null, bearing: h.bearing ?? bearings[h.number] ?? null } : h)),
+    }));
   },
   updateHole(id: string, patch: Partial<Hole>) {
     update((s) => ({ ...s, holes: s.holes.map((h) => (h.id === id ? { ...h, ...patch } : h)) }));
