@@ -10,6 +10,12 @@ const hole: Hole = {id:'h', courseId:'c',number:1,par:5,handicap:1,centerM:500,f
   shape:{path:[[0,0],[0,500]],green:box(-10,490,20,20),fairways:[],water:[],bunkers:[]}};
 const club = (id:string,carryM:number):Club => ({id,name:id,type:id==='Driver'?'Driver':'Iron',carryM,totalM:carryM+10,loft:30});
 const data = { clubs:[club('Driver',220),club('7 iron',140),club('Wedge',80)], shots:[], profile:null };
+test('an off-hole stale target cannot produce a 1215 metre Driver recommendation',()=>{
+ const p=planCaddie(hole,{...startHole(hole,null),target:[-1100,515]},data,'m');
+ assert.equal(p.advice,null);assert.equal(p.distanceM,null);assert.match(p.status,/Check the hole/);
+ const ball=planCaddie(hole,{...startHole(hole,null),ball:[1000,0],source:'map'},data,'m');
+ assert.equal(ball.advice,null);
+});
 test('green centre follows the outline when the hole line ends at its front edge',()=>{
  const h={...hole,shape:{...hole.shape!,path:[[0,0],[0,490]] as XY[]}};
  assert.deepEqual(greenCentre(h),[0,500]);

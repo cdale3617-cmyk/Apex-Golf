@@ -38,7 +38,7 @@ export function Caddie({ plan, playing, hasClubs, onChange }: { plan: CaddiePlan
   };
   return <div className="stack">
     <div className="caddie-call" aria-live="polite"><span className="eyebrow">Apex Caddie · shot {playing.shot}</span>
-      <h2>{plan.advice?.club ?? (playing.lie === 'Green' ? 'Putter' : plan.distanceM === null ? 'Where is your ball?' : !hasClubs ? 'Set up your bag' : 'Choose a clear target')}</h2>
+      <h2>{plan.status==='Check the hole and marker positions' ? 'Check marker positions' : plan.advice?.club ?? (playing.lie === 'Green' ? 'Putter' : plan.distanceM === null ? 'Where is your ball?' : !hasClubs ? 'Set up your bag' : 'Choose a clear target')}</h2>
       <p>{call}</p>
     </div>
     {canListen() && <Button variant="primary" onClick={talk}>{listening ? 'Listening… tap to send' : 'Talk to your caddie'}</Button>}

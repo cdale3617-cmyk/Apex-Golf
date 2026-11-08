@@ -1,12 +1,14 @@
 import { actions, getState, type Hole, type Shape, type XY } from "./store";
 import { edgeDistance } from "./strategy";
 import { COMPASS, bearing, metres, type Dir, type Pt } from "./geo";
+import { CAPRICORN_NAME, CAPRICORN_REVISION, isCapricorn, selectLayout, type MapWay } from './course-layout';
+import capricornMap from './data/capricorn-championship.json';
 
 // Courses come from OpenStreetMap (search and hole maps) and Open-Meteo (weather and height).
 // These services are asked straight from the phone. Nothing goes through a server of ours.
 
 export type Hit = { id: string; name: string; location: string; lat: number; lon: number; south: number; west: number; north: number; east: number };
-type Way = { tags?: Record<string, string>; geometry?: Pt[] };
+type Way = MapWay;
 type Box = { south: number; north: number; west: number; east: number };
 type Nom = { osm_type: string; osm_id: number; lat: string; lon: string; name?: string; display_name: string; category?: string; type?: string; boundingbox: string[] };
 type HoleIn = { number: number; par: number | null; handicap: number | null; edgesEstimated: boolean; lengthM: number; frontM: number; backM: number; teeLat: number; teeLon: number; greenLat: number; greenLon: number; bearing: number; shape: Shape };
@@ -102,7 +104,8 @@ async function mapData(hit: Hit): Promise<Way[]> {
   }
 }
 
-function buildHoles(elements: Way[]): HoleIn[] {
+export function buildHoles(input: Way[], capricorn = false): HoleIn[] {
+  const elements = selectLayout(input, capricorn);
   const greens = elements.filter((e) => e.tags?.golf === "green" && e.geometry && e.geometry.length > 2);
   const holeWays = elements.filter((e) => e.tags?.golf === "hole" && e.geometry && e.geometry.length >= 2);
   const anyRef = holeWays.some((w) => Number.isFinite(parseInt(w.tags?.ref ?? "", 10)));
@@ -141,8 +144,7 @@ function buildHoles(elements: Way[]): HoleIn[] {
       edgesEstimated: !greenRing, lengthM: length, frontM: Math.max(1, front), backM: back,
       teeLat: tee.lat, teeLon: tee.lon, greenLat: end.lat, greenLon: end.lon, bearing: bearing(tee, end), shape: shapeFor(g, elements, greenRing),
     };
-    const have = byNumber.get(number);
-    if (!have || have.lengthM < next.lengthM) byNumber.set(number, next);
+    byNumber.set(number, next);
   });
   return [...byNumber.values()].sort((a, z) => a.number - z.number);
 }
@@ -174,7 +176,31 @@ export async function refreshWeather(courseId: string, force = false): Promise<b
 
 const guessPar = (m: number) => (m <= 230 ? 3 : m <= 430 ? 4 : 5);
 
+function championshipRows(): Omit<Hole,'id'|'courseId'>[] {
+  return buildHoles(capricornMap,true).map(h=>({number:h.number,par:h.par!,handicap:0,
+    centerM:Math.round(h.lengthM),frontM:Math.round(h.frontM),backM:Math.round(h.backM),
+    tee:{lat:h.teeLat,lon:h.teeLon},mapBearing:h.bearing,bearing:h.bearing,shape:h.shape,
+    edgesEstimated:h.edgesEstimated,windKmh:0,windDir:'N',tempC:20,elevationM:0,slopeKnown:false}));
+}
+
+/** Repair the known combined 36-hole import, including stale coordinates, without network access. */
+export function repairCapricorn(courseId:string):boolean {
+  const course=getState().courses.find(c=>c.id===courseId);
+  if(!course || !isCapricorn(course) || course.mappingRevision===CAPRICORN_REVISION)return false;
+  return actions.replaceCourseMapping(courseId,CAPRICORN_NAME,CAPRICORN_REVISION,championshipRows());
+}
+
 export async function importCourse(hit: Hit, progress: (m: string) => void): Promise<string> {
+  if(isCapricorn(hit)) {
+    const existing=getState().courses.find(isCapricorn);
+    if(existing){
+      repairCapricorn(existing.id);
+      if(getState().courses.find(c=>c.id===existing.id)?.mappingRevision!==CAPRICORN_REVISION)throw new Error('The repaired mapping could not be saved. Free some storage and try again.');
+      return existing.id;
+    }
+    const rows=championshipRows();
+    return actions.addCourse({name:CAPRICORN_NAME,location:hit.location,holes:18,par:72,lat:hit.lat,lon:hit.lon,mappingRevision:CAPRICORN_REVISION},rows);
+  }
   progress("Reading " + hit.name + " hole by hole…");
   const holes = buildHoles(await mapData(hit));
   if (!holes.length) throw new Error("This course has no mapped holes yet, so there are no distances to load. Type it in by hand instead.");
@@ -302,6 +328,7 @@ function shapeFor(g: Pt[], elements: Way[], greenRing: Pt[] | null): Shape {
 export async function redrawCourse(courseId: string): Promise<boolean> {
   const c = getState().courses.find((x) => x.id === courseId);
   if (!c || c.lat === null || c.lon === null) return false;
+  if(isCapricorn(c))return repairCapricorn(courseId);
   try {
     const pad = 0.015;
     const hit: Hit = { id: "", name: c.name, location: c.location, lat: c.lat, lon: c.lon, south: c.lat - pad, north: c.lat + pad, west: c.lon - pad * 1.3, east: c.lon + pad * 1.3 };

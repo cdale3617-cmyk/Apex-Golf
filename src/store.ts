@@ -5,7 +5,7 @@ import { nextShot, playingKey, type PlayingState } from "./round-state";
 // Everything the app knows is kept on the phone, in its own storage. No server.
 
 export type ClubType = "Driver" | "Wood" | "Hybrid" | "Iron" | "Wedge" | "Putter";
-export interface Course { id: string; name: string; location: string; holes: number; par: number; lat: number | null; lon: number | null; wxAt: number }
+export interface Course { id: string; name: string; location: string; holes: number; par: number; lat: number | null; lon: number | null; wxAt: number; mappingRevision?:string }
 export type XY = [number, number];
 /** The real outline of a hole, in metres from the tee: right of the line (x) and forward (y). */
 export interface Shape { path: XY[]; green: XY[] | null; fairways: XY[][]; bunkers: XY[][]; water: XY[][] }
@@ -22,6 +22,7 @@ export interface Shot { measurement?: "carry" | "total"; roundId?: string | null
 export interface Conversion { id: string; title: string; courseId: string | null; holeNumber: number | null; style: string; createdAt: string; photo: string }
 export interface Profile { name: string; handicap: number | null; handedness: "Right" | "Left"; typicalMiss: string; notes: string }
 export interface State {
+  mappingBackups?: {course:Course;holes:Hole[];playing:Record<string,PlayingState>;savedAt:number}[];
   playing: Record<string, PlayingState>; courses: Course[]; holes: Hole[]; clubs: Club[]; rounds: Round[]; scores: HoleScore[]; shots: Shot[]; conversions: Conversion[]; profile: Profile | null;
 }
 
@@ -79,6 +80,25 @@ export function useData(): State {
 }
 
 export const actions = {
+  replaceCourseMapping(courseId:string,name:string,revision:string,rows:Omit<Hole,'id'|'courseId'>[]) {
+    const previous=state, course=state.courses.find(c=>c.id===courseId);
+    if(!course || rows.length!==18 || new Set(rows.map(h=>h.number)).size!==18)return false;
+    const old=state.holes.filter(h=>h.courseId===courseId), ids=new Set(old.map(h=>h.id));
+    const oldPlaying=Object.fromEntries(Object.entries(state.playing).filter(([,p])=>ids.has(p.holeId)));
+    const replacement=rows.map(row=>({...row,id:old.find(h=>h.number===row.number)?.id??uid(),courseId}));
+    const playing=Object.fromEntries(Object.entries(state.playing).map(([key,p])=>{
+      const h=replacement.find(h=>h.id===p.holeId);
+      if(!h)return [key,p];
+      // Local coordinates belong to the old map frame. Never carry them to a different routing.
+      return [key,{...p,target:null,remainingM:null,accuracyM:null,locatedAt:0,
+        ball:p.source==='tee'?h.shape!.path[0]:null,source:p.source==='tee'?'tee':'unknown'} as PlayingState];
+    }));
+    const saved=commit({...state,playing,holes:[...state.holes.filter(h=>h.courseId!==courseId),...replacement],
+      courses:state.courses.map(c=>c.id===courseId?{...c,name,mappingRevision:revision,holes:18,par:rows.reduce((sum,h)=>sum+h.par,0)}:c),
+      mappingBackups:[...(state.mappingBackups??[]),{course,holes:old,playing:oldPlaying,savedAt:Date.now()}]});
+    if(!saved){state=previous;subs.forEach(listener=>listener());}
+    return saved;
+  },
   setPlaying(p: PlayingState) {
     update((s) => ({ ...s, playing: { ...s.playing, [playingKey(p.holeId, p.roundId)]: p } }));
   },

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { Tab } from '../App';
-import { redrawCourse, refreshWeather } from '../courses';
+import { redrawCourse, refreshWeather, repairCapricorn } from '../courses';
 import { actions, getState, useData, type Hole, type Round, type XY } from '../store';
 import { useUnits } from '../units';
 import { Button, Empty, Field, Input, Panel, Select, Sheet, toast } from '../ui';
@@ -72,7 +72,7 @@ export default function Play({ go }: { go: (t: Tab) => void }) {
   const hole = holes[Math.min(index, Math.max(0, holes.length - 1))];
   const round = active?.courseId === course?.id ? active : undefined;
   const key = hole ? playingKey(hole.id, round?.id ?? null) : '';
-  const initial = useMemo(() => hole ? startHole(hole, round?.id ?? null) : null, [hole?.id, hole?.teeMarker, round?.id]);
+  const initial = useMemo(() => hole ? startHole(hole, round?.id ?? null) : null, [hole?.id, hole?.teeMarker, hole?.shape, round?.id]);
   const playing = d.playing[key] ?? initial;
   const [finder, setFinder] = useState(false), [editing, setEditing] = useState(false), [logging, setLogging] = useState(false);
   const [locating, setLocating] = useState(false), [problem, setProblem] = useState('');
@@ -91,6 +91,7 @@ export default function Play({ go }: { go: (t: Tab) => void }) {
   const tried = useRef(new Set<string>());
   useEffect(() => {
     if (!course) return;
+    if(repairCapricorn(course.id))toast('Championship mapping repaired. Old marker positions backed up; clubs and scores kept.');
     void refreshWeather(course.id);
     if (!tried.current.has(course.id) && holes.some(h => !h.shape || !h.tee)) {
       tried.current.add(course.id); void redrawCourse(course.id);
@@ -161,9 +162,11 @@ export default function Play({ go }: { go: (t: Tab) => void }) {
     <div className="map-view-controls"><Button size="sm" aria-pressed={satellite&&!showArt} onClick={()=>{setSatellite(true);setShowArt(false);setMode('target');localStorage.setItem('apex-map-view','satellite');}}>Satellite</Button><Button size="sm" aria-pressed={!satellite&&!showArt} onClick={()=>{setSatellite(false);setShowArt(false);localStorage.setItem('apex-map-view','map');}}>Map</Button></div>
     <div className="marker-controls">
       <Button size="sm" aria-pressed={targetLocked} disabled={!!draft} onClick={()=>setTargetLocked(!targetLocked)}>{targetLocked?'Unlock yellow target':'Lock yellow target'}</Button>
+      {playing.target && !draft && <Button size="sm" onClick={()=>{change({target:null,remainingM:null});setTargetLocked(false);}}>Reset yellow target</Button>}
       {draft ? <><Button size="sm" aria-pressed={selectedMarker==='tee'} onClick={()=>beginMarkers('tee')}>Move red tee</Button><Button size="sm" aria-pressed={selectedMarker==='green'} onClick={()=>beginMarkers('green')}>Move green</Button><Button size="sm" variant="primary" onClick={saveMarkers}>Save positions</Button><Button size="sm" onClick={()=>setMarkerDraft(null)}>Cancel</Button><span>Drag red tee or green dot. Save to lock.</span></> :
         <Button size="sm" disabled={!hole.shape} onClick={()=>beginMarkers('tee')}>Move red / green dots</Button>}
     </div>
+    {course.mappingRevision && <p className="muted">Championship layout · mapped distances; white-tee card distances and hazards need confirmation.</p>}
     <div className="pgrid s60">
       <section className="map">
         {showArt && art ? <><img className="reference-art" src={art} alt="Saved hole artwork"/><p className="art-note">Artwork reference only. Use Map for targets and distances.</p></> : <HoleArt key={hole.id} targetLocked={targetLocked} onToggleTargetLock={()=>setTargetLocked(value=>draft?true:!value)} selectedMarker={selectedMarker} onMarkerStart={beginMarkers} hole={previewHole} frameHole={hole} editingMarkers={!!draft} onMarker={(kind,p)=>setMarkerDraft(current=>current?{...current,[kind]:p}:null)} playing={draft&&playing.source==='tee'?{...playing,ball:draft.tee}:playing} plannedTarget={plan.plannedTarget} mode={mode} onPoint={onPoint} satellite={satellite} aimPoint={draft&&!playing.target?draft.green:plan.aimPoint}/>}

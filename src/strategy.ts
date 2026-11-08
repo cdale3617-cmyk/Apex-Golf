@@ -88,6 +88,11 @@ export function planCaddie(hole: Hole, playing: PlayingState, data: Pick<State, 
   const ball = usableBall(playing, now);
   const ds = greenDistances(hole, ball);
   const warnings = ['Mapped hazards may be incomplete. Check the hole before playing.'];
+  const path=hole.shape?.path;
+  const nearPath=(p:XY)=>path && path.length>1 && path.slice(1).some((b,i)=>edgeDistance(p,[path[i],b])<=200);
+  if(path && path.length>1 && ((ball&&!nearPath(ball)) || (playing.target&&!nearPath(playing.target)))) {
+    return {advice:null,warnings:[...warnings,'The ball or yellow target is outside this mapped hole. Reset the target or check the selected hole and ball position.'],hazards:[],plannedTarget:null,aimPoint:null,distances:null,distanceM:null,status:'Check the hole and marker positions'};
+  }
   if (playing.lie === 'Unknown') warnings.push('Lie is unconfirmed. Tell the caddie your lie before choosing a shot.');
   if (ball && hole.shape?.water.some(p => inside(ball, p))) warnings.push('Your ball position is inside mapped water. Check the mark and resolve any drop before planning.');
   const fresh = !!hole.weatherAt && now - hole.weatherAt < 45 * 60000;

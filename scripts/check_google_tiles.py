@@ -64,6 +64,12 @@ if not picture.startswith(b"\xff\xd8"):
 print(f"Google satellite session, viewport and JPEG verified at Yeppoon, zoom {zoom}.")
 notes = f"""Google satellite APK for owner testing
 
+Capricorn now uses only the 18-hole Championship routing, excluding the closed Resort layout.
+Opening a previously mixed Capricorn course repairs its maps offline and backs up the old mapping.
+Scores, clubs and photos stay saved. Old local marker/target coordinates are cleared.
+Hole 4 is a par 4. Distances are mapped measurements, not certified white-tee card distances.
+Off-hole ball/target coordinates withhold club advice; Reset yellow target returns aim to the green.
+
 Each hole and Whole hole now orient the red tee at the bottom, with the green ahead.
 This display correction preserves saved GPS, hazards, markers and distances.
 

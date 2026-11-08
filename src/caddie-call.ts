@@ -3,6 +3,7 @@ import type { CaddiePlan } from './strategy';
 
 /** The same short briefing is displayed and spoken for the current shot. */
 export function caddieCall(plan: CaddiePlan, playing: PlayingState): string {
+  if(plan.status==='Check the hole and marker positions')return 'The ball or yellow target is outside this mapped hole. Reset the yellow target and check your ball position before choosing a club.';
   if (playing.lie === 'Green') return 'Putter. Read the slope and pace, then pick your starting line.';
   if (!plan.advice) return 'Set your ball position first. Use GPS, mark the ball on the map, or tell me the remaining distance.';
   const line = (label: string) => plan.advice!.lines.find(item => item.label === label)?.text;
