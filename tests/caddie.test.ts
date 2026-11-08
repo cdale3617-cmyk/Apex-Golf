@@ -103,3 +103,15 @@ test('metres and yards share the same underlying geometry and club plan',()=>{
  const p=startHole(hole,'r');const m=planCaddie(hole,p,data,'m'),y=planCaddie(hole,p,data,'yd');
  assert.equal(m.advice?.club,y.advice?.club);assert.deepEqual(m.plannedTarget,y.plannedTarget);
 });
+
+
+test('corrected green marker drives centre distance without inventing front and back edges', async()=>{
+  const {greenCentre,greenDistances}=await import('../src/strategy');
+  const {startHole}=await import('../src/round-state');
+  const original={id:'corrected',shape:{path:[[0,0],[0,120]],green:[[-10,110],[10,110],[10,130],[-10,130]],fairways:[],water:[],bunkers:[]},teeMarker:[5,5],greenMarker:[25,150]} as any;
+  assert.deepEqual(startHole(original,null).ball,[5,5]);
+  assert.deepEqual(greenCentre(original),[25,150]);
+  const measured=greenDistances(original,[5,5])!;
+  assert.equal(measured.center,Math.hypot(20,145));
+  assert.equal(measured.front,null);assert.equal(measured.back,null);
+});

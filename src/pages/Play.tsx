@@ -10,7 +10,7 @@ import { HoleArt, type MapMode } from '../components/HoleArt';
 import { HoleEditor } from '../components/HoleEditor';
 import { ShotLogger } from '../components/ShotLogger';
 import { playingKey, startHole, type PlayingState } from '../round-state';
-import { distance, edgeDistance, localPoint, mappedLie, planCaddie } from '../strategy';
+import { distance, edgeDistance, greenCentre, localPoint, mappedLie, planCaddie } from '../strategy';
 import { getFix } from '../location';
 import { Compass } from '../components/Compass';
 import { usableBall } from '../round-state';
@@ -72,11 +72,12 @@ export default function Play({ go }: { go: (t: Tab) => void }) {
   const hole = holes[Math.min(index, Math.max(0, holes.length - 1))];
   const round = active?.courseId === course?.id ? active : undefined;
   const key = hole ? playingKey(hole.id, round?.id ?? null) : '';
-  const initial = useMemo(() => hole ? startHole(hole, round?.id ?? null) : null, [hole?.id, round?.id]);
+  const initial = useMemo(() => hole ? startHole(hole, round?.id ?? null) : null, [hole?.id, hole?.teeMarker, round?.id]);
   const playing = d.playing[key] ?? initial;
   const [finder, setFinder] = useState(false), [editing, setEditing] = useState(false), [logging, setLogging] = useState(false);
   const [locating, setLocating] = useState(false), [problem, setProblem] = useState('');
   const [mode, setMode] = useState<MapMode>('target');
+  const [markerDraft, setMarkerDraft] = useState<{holeId:string; tee:XY; green:XY} | null>(null);
   const [target, setTarget] = useState<'F' | 'C' | 'B'>('C');
   const [manual, setManual] = useState(''), [showArt, setShowArt] = useState(false);
   const [satellite,setSatellite]=useState(()=>localStorage.getItem('apex-map-view')!=='map');
@@ -84,7 +85,7 @@ export default function Play({ go }: { go: (t: Tab) => void }) {
   const currentKey = useRef(key); currentKey.current = key;
   useEffect(() => { const t = setInterval(() => setClock(Date.now()), 15000); return () => clearInterval(t); }, []);
   useEffect(() => () => { currentKey.current = ''; }, []);
-  useEffect(() => { setManual(''); setProblem(''); setMode('target'); setShowArt(false); setLogging(false); setLocating(false); setTarget('C'); }, [key]);
+  useEffect(() => { setManual(''); setProblem(''); setMode('target'); setShowArt(false); setLogging(false); setLocating(false); setTarget('C'); setMarkerDraft(null); }, [key]);
   const tried = useRef(new Set<string>());
   useEffect(() => {
     if (!course) return;
@@ -100,6 +101,16 @@ export default function Play({ go }: { go: (t: Tab) => void }) {
   const change = (patch: Partial<PlayingState>) => {
     const latest = getState().playing[key] ?? playing;
     actions.setPlaying({ ...latest, ...patch });
+  };
+  const draft = markerDraft?.holeId === hole.id ? markerDraft : null;
+  const previewHole = draft ? { ...hole, teeMarker: draft.tee, greenMarker: draft.green } : hole;
+  const saveMarkers = () => {
+    if (!draft) return;
+    const patch: Pick<Hole,'teeMarker'|'greenMarker'> = {};
+    if (distance(draft.tee,hole.teeMarker ?? hole.shape!.path[0]) > 0.01) patch.teeMarker = draft.tee;
+    if (distance(draft.green,greenCentre(hole)!) > 0.01) patch.greenMarker = draft.green;
+    if (!actions.saveMarkers(hole.id,patch)) return toast('Positions could not be saved. Try again.');
+    setMarkerDraft(null); toast('Tee and green saved. Dots locked.');
   };
   const art = d.conversions.find(c => c.courseId === hole.courseId && c.holeNumber === hole.number)?.photo;
   const gps = async () => {
@@ -142,10 +153,14 @@ export default function Play({ go }: { go: (t: Tab) => void }) {
     <div className="playrow"><div className="name">{course.name}</div><Button size="sm" onClick={() => setFinder(true)}>Courses</Button></div>
     <div className="hole-nav"><Button disabled={index === 0} onClick={() => setIndex(index-1)}>Previous</Button><strong>Hole {hole.number} · Par {hole.par}</strong><Button disabled={index >= holes.length-1} onClick={() => setIndex(index+1)}>Next</Button></div>
     <div className="map-view-controls"><Button size="sm" aria-pressed={satellite&&!showArt} onClick={()=>{setSatellite(true);setShowArt(false);setMode('target');localStorage.setItem('apex-map-view','satellite');}}>Satellite</Button><Button size="sm" aria-pressed={!satellite&&!showArt} onClick={()=>{setSatellite(false);setShowArt(false);localStorage.setItem('apex-map-view','map');}}>Map</Button></div>
+    <div className="marker-controls">
+      {draft ? <><Button size="sm" variant="primary" onClick={saveMarkers}>Save positions</Button><Button size="sm" onClick={()=>setMarkerDraft(null)}>Cancel</Button><span>Drag red tee or green dot. Save to lock.</span></> :
+        <Button size="sm" disabled={!hole.shape} onClick={()=>{setShowArt(false);setMode('target');setMarkerDraft({holeId:hole.id,tee:hole.teeMarker??hole.shape!.path[0],green:greenCentre(hole)!});}}>Move red / green dots</Button>}
+    </div>
     <div className="pgrid s60">
       <section className="map">
-        {showArt && art ? <><img className="reference-art" src={art} alt="Saved hole artwork"/><p className="art-note">Artwork reference only. Use Map for targets and distances.</p></> : <HoleArt hole={hole} playing={playing} plannedTarget={plan.plannedTarget} mode={mode} onPoint={onPoint} satellite={satellite} aimPoint={plan.aimPoint}/>}
-        <div className="map-caption">{showArt ? 'Artwork' : mode === 'target' ? 'Tap or drag: yellow target' : mode === 'ball' ? 'Tap or drag: your ball' : mode === 'remove' ? 'Tap a hazard to delete' : 'Tap to add a 20 m wide hazard'}</div>
+        {showArt && art ? <><img className="reference-art" src={art} alt="Saved hole artwork"/><p className="art-note">Artwork reference only. Use Map for targets and distances.</p></> : <HoleArt hole={previewHole} frameHole={hole} editingMarkers={!!draft} onMarker={(kind,p)=>setMarkerDraft(current=>current?{...current,[kind]:p}:null)} playing={draft&&playing.source==='tee'?{...playing,ball:draft.tee}:playing} plannedTarget={plan.plannedTarget} mode={mode} onPoint={onPoint} satellite={satellite} aimPoint={draft&&!playing.target?draft.green:plan.aimPoint}/>}
+        <div className="map-caption">{draft ? 'Drag red tee or green dot · Save positions' : showArt ? 'Artwork' : mode === 'target' ? 'Tap or drag: yellow target' : mode === 'ball' ? 'Tap or drag: your ball' : mode === 'remove' ? 'Tap a hazard to delete' : 'Tap to add a 20 m wide hazard'}</div>
       </section>
       <aside className="aside">
         <Caddie key={"caddie:"+key} plan={plan} playing={playing} hasClubs={d.clubs.some(c => c.type !== 'Putter' && c.carryM > 0)} onChange={change}/>
@@ -164,7 +179,7 @@ export default function Play({ go }: { go: (t: Tab) => void }) {
         <details><summary>Ball and map tools</summary><div className="stack">
           <Button aria-pressed={mode==='ball'} onClick={() => {setMode('ball');setShowArt(false);}}>Set ball on map</Button>
           <Button aria-pressed={mode==='target'} onClick={() => {setMode('target');setShowArt(false);}}>Move yellow target</Button>
-          <Button onClick={() => { change({ball:hole.shape?.path[0]??null,source:'tee',accuracyM:null,remainingM:null,lie:'Tee',locatedAt:Date.now()}); }}>Ball at tee</Button>
+          <Button onClick={() => { change({ball:hole.teeMarker??hole.shape?.path[0]??null,source:'tee',accuracyM:null,remainingM:null,lie:'Tee',locatedAt:Date.now()}); }}>Ball at tee</Button>
           <Field label={'Remaining distance ('+u.unit+')'}><Input type="number" inputMode="numeric" value={manual} onChange={e => setManual(e.target.value)} placeholder="To your target"/></Field>
           <Button onClick={() => {const m = u.fromInput(manual); if (!(m>=3 && m<=1000)) return toast('Enter 3–1000 metres, or the equivalent in yards.'); change({remainingM:m,source:'manual',ball:null,accuracyM:null});}}>Use distance</Button>
           <Button onClick={() => change({shot:Math.max(1,playing.shot-1)})}>Correct shot count −1</Button>

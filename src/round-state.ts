@@ -15,7 +15,7 @@ export interface PlayingState {
 }
 export const playingKey = (holeId: string, roundId: string | null) => `${roundId ?? 'practice'}:${holeId}`;
 export function startHole(hole: Hole, roundId: string | null): PlayingState {
-  return { holeId: hole.id, roundId, shot: 1, lie: 'Tee', stance: 'Flat', ball: hole.shape?.path[0] ?? null,
+  return { holeId: hole.id, roundId, shot: 1, lie: 'Tee', stance: 'Flat', ball: hole.teeMarker ?? hole.shape?.path[0] ?? null,
     source: 'tee', accuracyM: null, locatedAt: Date.now(), remainingM: null, target: null };
 }
 export function nextShot(s: PlayingState): PlayingState {

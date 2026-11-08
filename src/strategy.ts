@@ -34,6 +34,7 @@ export const along = (a: XY, b: XY, m: number): XY => {
   return length ? [a[0] + (b[0] - a[0]) * m / length, a[1] + (b[1] - a[1]) * m / length] : a;
 };
 export function greenCentre(hole: Hole): XY | null {
+  if (hole.greenMarker) return hole.greenMarker;
   const ring = hole.shape?.green;
   let area = 0, x = 0, y = 0;
   for (let i = 0; ring && i < ring.length; i++) {
@@ -49,12 +50,12 @@ export function greenCentre(hole: Hole): XY | null {
 export function greenDistances(hole: Hole, ball: XY | null) {
   const center = greenCentre(hole);
   if (!ball || !center) return null;
-  const ring = hole.shape?.green;
+  const ring = hole.greenMarker ? null : hole.shape?.green;
   return { center: distance(ball, center), front: ring?.length ? edgeDistance(ball, ring) : null,
     back: ring?.length ? Math.max(...ring.map(p => distance(ball, p))) : null, point: center };
 }
 export function mappedLie(hole: Hole, p: XY): string {
-  if (hole.shape?.green && inside(p, hole.shape.green)) return 'Green';
+  if (!hole.greenMarker && hole.shape?.green && inside(p, hole.shape.green)) return 'Green';
   if (hole.shape?.bunkers.some(poly => inside(p, poly))) return distance(p, hole.shape.path[hole.shape.path.length - 1]) < 40 ? 'Greenside bunker' : 'Fairway bunker';
   if (hole.shape?.fairways.some(poly => inside(p, poly))) return 'Fairway';
   return 'Unknown';
@@ -93,7 +94,7 @@ export function planCaddie(hole: Hole, playing: PlayingState, data: Pick<State, 
   if (!fresh) warnings.push('Weather unavailable or old; wind and temperature are excluded.');
   if (!hole.slopeKnown || playing.source !== 'tee') warnings.push('Slope for this shot is unknown; slope is excluded.');
   let destination = playing.target ?? ds?.point ?? null;
-  if (!playing.target && ds && hole.shape?.green?.length && target !== 'C') {
+  if (!playing.target && ds && !hole.greenMarker && hole.shape?.green?.length && target !== 'C') {
     destination = [...hole.shape.green].sort((a,b) => distance(ball!, a) - distance(ball!, b))[target === 'F' ? 0 : hole.shape.green.length - 1];
   }
   const manual = playing.remainingM !== null && Number.isFinite(playing.remainingM) && playing.remainingM > 0;
@@ -104,7 +105,7 @@ export function planCaddie(hole: Hole, playing: PlayingState, data: Pick<State, 
   if (base < 3) return { advice: null, warnings: [...warnings, 'On or beside the target. Read the green and choose your putt or short chip.'], hazards: [], plannedTarget: destination, aimPoint: destination, distances: ds, distanceM: base, status };
   const geo = !!ball && !!destination && !manual;
   if (!geo) warnings.push('Ball geometry is unavailable; hazard clearance and aim cannot be checked.');
-  if (!hole.shape?.green?.length) warnings.push('Green edges are unavailable. Front and back card distances are estimates.');
+  if (hole.greenMarker || !hole.shape?.green?.length) warnings.push('Green edges are unconfirmed. Centre uses your saved marker.');
   const heading = geo ? ((hole.mapBearing ?? hole.bearing ?? 0) + Math.atan2(destination![0] - ball![0], destination![1] - ball![1]) * 180 / Math.PI + 360) % 360 : playing.source === 'tee' ? hole.bearing : null;
   const stats = clubStats(data.clubs, data.shots);
   const a = advise({ hole: { ...hole, bearing: heading, windKmh: fresh ? hole.windKmh : 0, tempC: fresh ? hole.tempC : 20, elevationM: hole.slopeKnown && playing.source === 'tee' ? hole.elevationM : 0 },
@@ -133,7 +134,7 @@ export function planCaddie(hole: Hole, playing: PlayingState, data: Pick<State, 
         return false;
       });
       const fairways = hole.shape!.fairways;
-      const inLandingArea = !fairways.length || fairways.some(p => inside(landingPoint, p)) || (!!hole.shape!.green && inside(landingPoint, hole.shape!.green));
+      const inLandingArea = !fairways.length || fairways.some(p => inside(landingPoint, p)) || (!hole.greenMarker && !!hole.shape!.green && inside(landingPoint, hole.shape!.green));
       return { c, landing, partial, safe: safe && inLandingArea, carry: carryFor(c, stats) };
     }).filter(o => o.safe).sort((a,b) => Math.abs(base - a.landing) - Math.abs(base - b.landing) || Number(a.partial) - Number(b.partial) || a.carry - b.carry);
     const pick = options[0];

@@ -12,6 +12,7 @@ export interface Shape { path: XY[]; green: XY[] | null; fairways: XY[][]; bunke
 export interface Hole {
   id: string; courseId: string; number: number; par: number; handicap: number;
   centerM: number; frontM: number; backM: number;
+  teeMarker?: XY; greenMarker?: XY;
   windKmh: number; windDir: Dir; tempC: number; elevationM: number; bearing: number | null; shape?: Shape | null; tee?: Pt; mapBearing?: number; edgesEstimated?: boolean; weatherAt?: number; slopeKnown?: boolean;
 }
 export interface Club { id: string; name: string; type: ClubType; loft: number; carryM: number; totalM: number }
@@ -119,6 +120,17 @@ export const actions = {
   },
   updateHole(id: string, patch: Partial<Hole>) {
     update((s) => ({ ...s, holes: s.holes.map((h) => (h.id === id ? { ...h, ...patch } : h)) }));
+  },
+  saveMarkers(id: string, patch: Pick<Hole, 'teeMarker' | 'greenMarker'>) {
+    if (Object.values(patch).some(p => !p || p.length !== 2 || !p.every(Number.isFinite))) return false;
+    const previous = state;
+    const saved = update(s => ({ ...s,
+      holes: s.holes.map(h => h.id === id ? { ...h, ...patch } : h),
+      playing: Object.fromEntries(Object.entries(s.playing).map(([key,p]) => [key,
+        p.holeId === id && p.source === 'tee' && patch.teeMarker ? { ...p, ball: patch.teeMarker, remainingM: null } : p])),
+    }));
+    if (!saved) { state = previous; subs.forEach(listener => listener()); }
+    return saved;
   },
   setWeather(courseId: string, w: { tempC: number; windKmh: number; windDir: Dir }) {
     update((s) => ({
