@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import type { Hole, XY } from '../store';
 import type { PlayingState } from '../round-state';
 import { usableBall } from '../round-state';
@@ -10,6 +10,7 @@ export type MapMode = 'target' | 'ball' | 'water' | 'bunker' | 'remove';
 export function HoleArt({ hole, playing, plannedTarget, mode, onPoint, satellite = true, aimPoint }: {
   hole: Hole; playing: PlayingState; plannedTarget: XY | null; mode: MapMode; onPoint: (p: XY) => void; satellite?: boolean; aimPoint?: XY | null;
 }) {
+  const [attribution, setAttribution] = useState("");
   const ref = useRef<SVGSVGElement>(null);
   const shape = hole.shape;
   if (!shape || shape.path.length < 2) return <div className="empty"><h2>Hole map unavailable</h2><p>Use the card distance or enter your remaining distance. No hazards have been invented.</p></div>;
@@ -36,12 +37,12 @@ export function HoleArt({ hole, playing, plannedTarget, mode, onPoint, satellite
   const windFrom = COMPASS.indexOf(hole.windDir)*45;
   const windAngle = windFrom+180-(hole.mapBearing??hole.bearing??0);
   const showWind = windFresh&&hole.windKmh>0&&windFrom>=0&&(hole.mapBearing!==undefined||hole.bearing!==null);
-  return <svg ref={ref} viewBox="0 0 320 540" role="img" aria-label={`Hole ${hole.number}. Tee at bottom. Tap or drag to set ${mode}.`}
+  return <><svg ref={ref} viewBox="0 0 320 540" role="img" aria-label={`Hole ${hole.number}. Tee at bottom. Tap or drag to set ${mode}.`}
     style={{ touchAction: 'none' }}
     onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); const p = point(e); if (p) onPoint(p); }}
     onPointerMove={e => { if (e.buttons && ['ball','target'].includes(mode)) { const p = point(e); if (p) onPoint(p); } }}>
     <rect width="320" height="540" fill="#17391d"/>
-    {satellite&&<Satellite hole={hole} frame={{minX,maxX,minY,maxY,scale}}/>}
+    {satellite&&<Satellite hole={hole} frame={{minX,maxX,minY,maxY,scale}} onAttribution={setAttribution}/>}
     <g opacity={satellite?0.32:1} pointerEvents="none">
     {shape.fairways.map((p,i) => <polygon key={'f'+i} points={pts(p)} fill="#62b83b"/>)}
     {!shape.fairways.length && <polyline points={pts(shape.path)} fill="none" stroke="#658568" strokeDasharray="3 6" strokeWidth="2"/>}
@@ -61,5 +62,5 @@ export function HoleArt({ hole, playing, plannedTarget, mode, onPoint, satellite
     {ball && marker(ball, '#ffffff', 'Your ball')}
     {marker(target, '#ffdf00', 'Your target')}
     {!satellite&&<text x="10" y="525" fill="#fff" fontSize="9">{shape.fairways.length ? 'Mapped features · tee at bottom' : 'Fairway outline unavailable · use Satellite'}</text>}
-  </svg>;
+  </svg>{satellite && attribution && <div className="map-attribution">{attribution.startsWith("Google Maps") && <strong>Google Maps</strong>}<span>{attribution.replace(/^Google Maps · /, "")}</span><span>Course features © OpenStreetMap contributors / your observations</span></div>}</>;
 }

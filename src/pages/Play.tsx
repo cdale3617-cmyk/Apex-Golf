@@ -141,7 +141,7 @@ export default function Play({ go }: { go: (t: Tab) => void }) {
   return <div className="play">
     <div className="playrow"><div className="name">{course.name}</div><Button size="sm" onClick={() => setFinder(true)}>Courses</Button></div>
     <div className="hole-nav"><Button disabled={index === 0} onClick={() => setIndex(index-1)}>Previous</Button><strong>Hole {hole.number} · Par {hole.par}</strong><Button disabled={index >= holes.length-1} onClick={() => setIndex(index+1)}>Next</Button></div>
-    <div className="map-view-controls"><Button size="sm" aria-pressed={satellite&&!showArt} onClick={()=>{setSatellite(true);setShowArt(false);localStorage.setItem('apex-map-view','satellite');}}>Satellite</Button><Button size="sm" aria-pressed={!satellite&&!showArt} onClick={()=>{setSatellite(false);setShowArt(false);localStorage.setItem('apex-map-view','map');}}>Map</Button></div>
+    <div className="map-view-controls"><Button size="sm" aria-pressed={satellite&&!showArt} onClick={()=>{setSatellite(true);setShowArt(false);setMode('target');localStorage.setItem('apex-map-view','satellite');}}>Satellite</Button><Button size="sm" aria-pressed={!satellite&&!showArt} onClick={()=>{setSatellite(false);setShowArt(false);localStorage.setItem('apex-map-view','map');}}>Map</Button></div>
     <div className="pgrid s60">
       <section className="map">
         {showArt && art ? <><img className="reference-art" src={art} alt="Saved hole artwork"/><p className="art-note">Artwork reference only. Use Map for targets and distances.</p></> : <HoleArt hole={hole} playing={playing} plannedTarget={plan.plannedTarget} mode={mode} onPoint={onPoint} satellite={satellite} aimPoint={plan.aimPoint}/>}
@@ -172,7 +172,7 @@ export default function Play({ go }: { go: (t: Tab) => void }) {
           <Button onClick={() => setEditing(true)}>Edit hole / conditions</Button>
           <Button onClick={() => void refreshWeather(course.id,true).then(ok=>toast(ok?'Weather updated.':'Weather unavailable.'))}>Refresh weather</Button>
           <details><summary>Mark or remove hazards</summary><p className="muted">Tap the map to add a 10 m radius water or bunker area. These are approximate marks, saved on this phone.</p>
-          <Button onClick={() => {setMode('water');setShowArt(false);}}>Mark water</Button><Button onClick={() => {setMode('bunker');setShowArt(false);}}>Mark bunker</Button><Button onClick={() => {setMode('remove');setShowArt(false);}}>Remove hazard</Button></details>
+          <Button onClick={() => {setMode('water');setShowArt(false);setSatellite(false);}}>Mark water</Button><Button onClick={() => {setMode('bunker');setShowArt(false);setSatellite(false);}}>Mark bunker</Button><Button onClick={() => {setMode('remove');setShowArt(false);setSatellite(false);}}>Remove hazard</Button></details>
         </div></details>
         <Button onClick={() => setLogging(true)}>Log a measured carry</Button>
         {round ? <ScoreStep key={"score:"+key} suggestedStrokes={playing.shot-1} round={round} hole={hole} last={index>=holes.length-1} onNext={() => setIndex(index+1)}/> : <Button onClick={() => go('score')}>Start a scored round</Button>}

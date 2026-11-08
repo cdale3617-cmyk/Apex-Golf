@@ -43,7 +43,9 @@ jobs:
       - name: Create the Android project
         run: npx cap add android
 
-      - name: Allow location, microphone and internet
+      - name: Configure Android permissions and Google satellite
+        env:
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
         run: python3 scripts/patch_manifest.py
 
       - name: Copy the web app into Android
@@ -55,15 +57,20 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon --stacktrace
 
+      - name: Verify Google satellite at Yeppoon and record app identity
+        env:
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+        run: python3 scripts/check_google_tiles.py
+
       - name: Keep the APK with this run
         uses: actions/upload-artifact@v4
         with:
           name: APEX-Golf-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
 
-      - name: Publish the APK on the Releases page
+      - name: Prepare the Google satellite APK for owner testing
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           cp android/app/build/outputs/apk/debug/app-debug.apk APEX-Golf.apk
-          gh release create "build-${GITHUB_RUN_NUMBER}" APEX-Golf.apk --title "APEX Golf — caddie build ${GITHUB_RUN_NUMBER}" --notes "Shared shot state, GPS ball position, draggable target and mapped hazard checks. Download APEX-Golf.apk. Confirm GPS and speech on your phone before course use." --target "$GITHUB_SHA" --latest
+          gh release create "build-${GITHUB_RUN_NUMBER}" APEX-Golf.apk --title "APEX Golf — Google satellite build ${GITHUB_RUN_NUMBER}" --notes-file google-build-notes.txt --target "$GITHUB_SHA" --draft

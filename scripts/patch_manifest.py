@@ -1,5 +1,6 @@
 from pathlib import Path
 import re
+import os
 import shutil
 import xml.etree.ElementTree as ET
 
@@ -43,3 +44,28 @@ if launch is not None:
         item.text = value
     styles.write(styles_path, encoding="unicode")
 print("Manifest patched")
+
+# Keep the credential out of Git and the web bundle. CI injects it into Android only.
+key = os.environ.get("GOOGLE_MAPS_API_KEY", "").strip()
+if key and not re.fullmatch(r"[A-Za-z0-9_-]{20,200}", key):
+    raise SystemExit("Invalid Google Maps key format")
+if os.environ.get("CI") and not key:
+    raise SystemExit("GOOGLE_MAPS_API_KEY repository secret is required")
+values = Path("android/app/src/main/res/values/google_maps.xml")
+resources = ET.Element("resources")
+ET.SubElement(resources, "string", name="google_maps_api_key", translatable="false").text = key
+ET.ElementTree(resources).write(values, encoding="unicode")
+java = Path("android/app/src/main/java/com/apexgolf/caddie")
+java.mkdir(parents=True, exist_ok=True)
+shutil.copyfile("scripts/GoogleTilesPlugin.java", java / "GoogleTilesPlugin.java")
+(java / "MainActivity.java").write_text("""package com.apexgolf.caddie;
+import android.os.Bundle;
+import com.getcapacitor.BridgeActivity;
+public class MainActivity extends BridgeActivity {
+    @Override public void onCreate(Bundle state) {
+        registerPlugin(GoogleTilesPlugin.class);
+        super.onCreate(state);
+    }
+}
+""")
+print("Native Google satellite bridge configured")
