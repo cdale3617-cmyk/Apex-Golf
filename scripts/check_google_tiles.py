@@ -64,6 +64,9 @@ if not picture.startswith(b"\xff\xd8"):
 print(f"Google satellite session, viewport and JPEG verified at Yeppoon, zoom {zoom}.")
 notes = f"""Google satellite APK for owner testing
 
+Each hole and Whole hole now orient the red tee at the bottom, with the green ahead.
+This display correction preserves saved GPS, hazards, markers and distances.
+
 Verified a live satellite JPEG and coverage metadata at Yeppoon in CI.
 Google imagery is online only and is not saved or passed to the art converter.
 Tap yellow to lock it, then drag the red tee or green centre. Save positions when done.

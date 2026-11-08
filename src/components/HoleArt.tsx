@@ -7,11 +7,21 @@ import { Satellite } from './Satellite';
 import { COMPASS } from '../geo';
 import { anchoredCamera, cameraFrame, clampZoom, worldAt, zoomAt, type Camera } from '../map-camera';
 import type { MapFrame } from '../satellite-geometry';
+import { holeView, teeBottomFrame } from '../hole-view';
 
 export type MapMode = 'target' | 'ball' | 'water' | 'bunker' | 'remove';
-export function HoleArt({ hole, playing, plannedTarget, mode, onPoint, satellite = true, aimPoint, frameHole, editingMarkers = false, onMarker, targetLocked = false, onToggleTargetLock, selectedMarker = 'tee', onMarkerStart }: {
+type HoleArtProps = {
   hole: Hole; playing: PlayingState; plannedTarget: XY | null; mode: MapMode; onPoint: (p: XY) => void; satellite?: boolean; aimPoint?: XY | null; frameHole?: Hole; editingMarkers?: boolean; onMarker?: (kind:'tee'|'green',p:XY)=>void; targetLocked?: boolean; onToggleTargetLock?:()=>void; selectedMarker?:'tee'|'green'; onMarkerStart?:(kind:'tee'|'green')=>void;
-}) {
+};
+export function HoleArt(props:HoleArtProps) {
+  const reference=props.frameHole??props.hole,view=holeView(reference),r=(p:XY)=>view.rotate(p);
+  return <HoleArtView key={`${props.hole.id}:${view.angle}`} {...props}
+    hole={view.project(props.hole)} frameHole={view.project(reference)}
+    playing={{...props.playing,ball:props.playing.ball?r(props.playing.ball):null,target:props.playing.target?r(props.playing.target):null}}
+    plannedTarget={props.plannedTarget?r(props.plannedTarget):null} aimPoint={props.aimPoint?r(props.aimPoint):null}
+    onPoint={p=>props.onPoint(view.rotate(p,true))} onMarker={(kind,p)=>props.onMarker?.(kind,view.rotate(p,true))}/>;
+}
+function HoleArtView({ hole, playing, plannedTarget, mode, onPoint, satellite = true, aimPoint, frameHole, editingMarkers = false, onMarker, targetLocked = false, onToggleTargetLock, selectedMarker = 'tee', onMarkerStart }:HoleArtProps) {
   const [attribution, setAttribution] = useState("");
   const ref = useRef<SVGSVGElement>(null);
   type DragKind='tee'|'green'|'yellow'|'pan'|'point';
@@ -28,10 +38,9 @@ export function HoleArt({ hole, playing, plannedTarget, mode, onPoint, satellite
   const target = playing.target ?? aimPoint ?? green;
   const frameShape = frameHole?.shape ?? shape;
   const all = [...frameShape.path, ...(frameShape.green ?? []), ...(frameHole?.teeMarker ? [frameHole.teeMarker] : []), ...(frameHole?.greenMarker ? [frameHole.greenMarker] : [])];
-  const minX = Math.min(...all.map(p => p[0])) - 25, maxX = Math.max(...all.map(p => p[0])) + 25;
-  const minY = Math.min(...all.map(p => p[1])) - 25, maxY = Math.max(...all.map(p => p[1])) + 25;
-  const base={minX,maxX,minY,maxY,scale:Math.min(270/(maxX-minX),470/(maxY-minY))};
-  const home:Camera={zoom:1,center:[(minX+maxX)/2,(minY+maxY)/2]};
+  const frameTee=frameHole?.teeMarker??frameShape.path[0];
+  const base=teeBottomFrame(frameTee,all);
+  const home:Camera={zoom:1,center:[(base.minX+base.maxX)/2,(base.minY+base.maxY)/2]};
   const camera=cameraState??home;cameraRef.current=camera;
   const frame=cameraFrame(base,camera),scale=frame.scale;
   const setCamera=(value:Camera)=>{cameraRef.current=value;setCameraState(value);};
@@ -86,7 +95,7 @@ export function HoleArt({ hole, playing, plannedTarget, mode, onPoint, satellite
   const zoom=(factor:number)=>{
     const current=cameraRef.current??home,next=clampZoom(current.zoom*factor);
     if(next===1){setCamera(home);return;}
-    if(editingMarkers){setCamera({zoom:next,center:selectedMarker==='tee'?tee:green});return;}
+    if(editingMarkers){setCamera(selectedMarker==='tee'?anchoredCamera(base,next,[160,500],tee):{zoom:next,center:green});return;}
     const focus:XY=x(target)>=0&&x(target)<=320&&y(target)>=0&&y(target)<=540?[x(target),y(target)]:[160,270];
     setCamera(zoomAt(base,current,next,focus));
   };
