@@ -19,9 +19,9 @@ export function geographicPoint(p: XY, tee: Pt, bearing: number): Pt {
     lon: tee.lon + east / (111320 * Math.cos((tee.lat * Math.PI) / 180)),
   };
 }
-export function satelliteTiles(hole: Hole, frame: MapFrame) {
-  if (!hole.tee || hole.mapBearing === undefined) return [];
-  const zoom = Math.max(
+export function satelliteZoom(hole: Hole, frame: MapFrame) {
+  if (!hole.tee) return 14;
+  return Math.max(
     14,
     Math.min(
       19,
@@ -35,6 +35,13 @@ export function satelliteTiles(hole: Hole, frame: MapFrame) {
       ),
     ),
   );
+}
+export function satelliteTiles(
+  hole: Hole,
+  frame: MapFrame,
+  zoom = satelliteZoom(hole, frame),
+) {
+  if (!hole.tee || hole.mapBearing === undefined) return [];
   const size = 256 * 2 ** zoom;
   const world = (p: Pt): XY => [
     ((p.lon + 180) / 360) * size,
@@ -90,44 +97,132 @@ export function satelliteTiles(hole: Hole, frame: MapFrame) {
   return tiles;
 }
 
+/** Esri can return a grey no-data picture with HTTP 200. */
+export function unavailablePixels(data: ArrayLike<number>): boolean {
+  let opaque = 0,
+    neutral = 0,
+    flat = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] < 240) continue;
+    opaque++;
+    const r = data[i],
+      g = data[i + 1],
+      b = data[i + 2];
+    if (Math.max(r, g, b) - Math.min(r, g, b) < 5) {
+      neutral++;
+      if (r > 170 && r < 240) flat++;
+    }
+  }
+  return opaque === 0 || (neutral / opaque > 0.96 && flat / opaque > 0.7);
+}
+
+async function availableTile(blob: Blob): Promise<boolean> {
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 64;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) throw Error("Satellite image could not be checked.");
+  if (typeof createImageBitmap === "function") {
+    const bitmap = await createImageBitmap(blob);
+    try {
+      context.drawImage(bitmap, 0, 0, 64, 64);
+    } finally {
+      bitmap.close();
+    }
+  } else {
+    const url = URL.createObjectURL(blob),
+      image = new Image();
+    try {
+      await new Promise<void>((resolve, reject) => {
+        image.onload = () => resolve();
+        image.onerror = () =>
+          reject(Error("Satellite image could not be decoded."));
+        image.src = url;
+      });
+      context.drawImage(image, 0, 0, 64, 64);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+  return !unavailablePixels(context.getImageData(0, 0, 64, 64).data);
+}
+
+type Tile = ReturnType<typeof satelliteTiles>[number];
+export async function loadSatelliteFrame<T>(
+  hole: Hole,
+  frame: MapFrame,
+  loadTile: (tile: Tile) => Promise<T>,
+  signal: AbortSignal,
+) {
+  if (!hole.tee || hole.mapBearing === undefined)
+    throw Error("Satellite needs a mapped tee.");
+  for (let zoom = satelliteZoom(hole, frame); zoom >= 14; zoom--) {
+    if (signal.aborted) throw Error("Satellite loading stopped.");
+    const tiles = satelliteTiles(hole, frame, zoom);
+    if (!tiles.length) continue;
+    const results = await Promise.allSettled(tiles.map(loadTile));
+    if (signal.aborted) throw Error("Satellite loading stopped.");
+    if (results.every((result) => result.status === "fulfilled")) {
+      return {
+        tiles,
+        images: results.map(
+          (result) => (result as PromiseFulfilledResult<T>).value,
+        ),
+      };
+    }
+  }
+  throw Error("Satellite unavailable here. Try again online or use Map.");
+}
+
 export function Satellite({ hole, frame }: { hole: Hole; frame: MapFrame }) {
-  const tiles = satelliteTiles(hole, frame),
-    key = tiles.map((t) => t.url + t.transform).join("|");
-  const [images, setImages] = useState<Record<string, string>>({});
-  const [failed, setFailed] = useState(false);
+  const key = JSON.stringify([hole.tee, hole.mapBearing, frame]);
+  const [images, setImages] = useState<{ tile: Tile; url: string }[]>([]);
+  const [problem, setProblem] = useState("");
   useEffect(() => {
     let active = true;
     const controller = new AbortController(),
       urls: string[] = [];
-    setImages({});
-    setFailed(false);
-    const timer = setTimeout(() => controller.abort(), 25000);
+    setImages([]);
+    setProblem("");
     void (async () => {
       const cache =
         typeof caches === "undefined"
           ? null
           : await caches.open("apex-satellite-v1").catch(() => null);
-      await Promise.all(
-        tiles.map(async (tile) => {
+      const result = await loadSatelliteFrame(
+        hole,
+        frame,
+        async (tile) => {
+          const cached = await cache?.match(tile.url).catch(() => undefined);
+          const response =
+            cached ??
+            (await fetch(tile.url, {
+              signal: AbortSignal.any([
+                controller.signal,
+                AbortSignal.timeout(10000),
+              ]),
+            }));
+          if (!response.ok) throw Error("Satellite unavailable.");
+          const copy = response.clone(),
+            blob = await response.blob();
           try {
-            let response = await cache?.match(tile.url).catch(() => undefined);
-            if (!response) {
-              response = await fetch(tile.url, { signal: controller.signal });
-              if (!response.ok) throw Error("Satellite unavailable");
-              await cache
-                ?.put(tile.url, response.clone())
-                .catch(() => undefined);
-            }
-            const url = URL.createObjectURL(await response.blob());
-            urls.push(url);
-            if (active)
-              setImages((previous) => ({ ...previous, [tile.url]: url }));
-            else URL.revokeObjectURL(url);
-          } catch {
-            if (active) setFailed(true);
+            if (!(await availableTile(blob)))
+              throw Error("Satellite detail unavailable at this zoom.");
+          } catch (error) {
+            await cache?.delete(tile.url).catch(() => undefined);
+            throw error;
           }
-        }),
+          if (!cached) await cache?.put(tile.url, copy).catch(() => undefined);
+          return blob;
+        },
+        controller.signal,
       );
+      if (!active) return;
+      const complete = result.tiles.map((tile, i) => {
+        const url = URL.createObjectURL(result.images[i]);
+        urls.push(url);
+        return { tile, url };
+      });
+      setImages(complete);
       const keys = await cache?.keys();
       if (keys && keys.length > 1024)
         await Promise.all(
@@ -135,38 +230,32 @@ export function Satellite({ hole, frame }: { hole: Hole; frame: MapFrame }) {
             .slice(0, keys.length - 1024)
             .map((request) => cache!.delete(request)),
         );
-      clearTimeout(timer);
-    })().catch(() => {
-      if (active) setFailed(true);
+    })().catch((error) => {
+      if (active)
+        setProblem(
+          error instanceof Error ? error.message : "Satellite unavailable.",
+        );
     });
     return () => {
       active = false;
-      clearTimeout(timer);
       controller.abort();
       urls.forEach((url) => URL.revokeObjectURL(url));
     };
   }, [key]);
   return (
     <g className="satellite-layer" pointerEvents="none">
-      {tiles.map(
-        (tile) =>
-          images[tile.url] && (
-            <image
-              key={tile.url}
-              href={images[tile.url]}
-              width="256.5"
-              height="256.5"
-              transform={tile.transform}
-            />
-          ),
-      )}
-      {(!tiles.length || failed || !Object.keys(images).length) && (
-        <text x="10" y="22" className="map-status" fontSize="10">
-          {!tiles.length
-            ? "Satellite needs a mapped tee"
-            : failed
-              ? "Satellite unavailable here · showing mapped features"
-              : "Loading satellite…"}
+      {images.map(({ tile, url }) => (
+        <image
+          key={tile.url}
+          href={url}
+          width="256.5"
+          height="256.5"
+          transform={tile.transform}
+        />
+      ))}
+      {(problem || !images.length) && (
+        <text x="10" y="22" className="map-status" fontSize="9">
+          {problem || "Loading available satellite imagery…"}
         </text>
       )}
       <text x="10" y="508" className="map-status" fontSize="7">
