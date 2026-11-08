@@ -142,7 +142,8 @@ export default function Play({ go }: { go: (t: Tab) => void }) {
         <div className="map-caption">{showArt ? 'Artwork' : mode === 'target' ? 'Tap or drag: yellow target' : mode === 'ball' ? 'Tap or drag: your ball' : mode === 'remove' ? 'Tap a hazard to delete' : 'Tap to add a 20 m wide hazard'}</div>
       </section>
       <aside className="aside">
-        <Caddie key={"caddie:"+key} plan={plan} playing={playing} onChange={change}/>
+        <Caddie key={"caddie:"+key} plan={plan} playing={playing} hasClubs={d.clubs.some(c => c.type !== 'Putter' && c.carryM > 0)} onChange={change}/>
+        {!d.clubs.some(c => c.type !== 'Putter' && c.carryM > 0) && <Button variant="primary" onClick={() => go('bag')}>Set up your bag</Button>}
         <p className="muted">Mapped hazards may be incomplete. Check before playing.</p>
         <Panel title={plan.status}>
           <div className="dist"><div className="l">Target · {u.unit}</div><div className="big">{number(plan.distanceM)}</div>{plan.advice && <p>Plays like {u.d(plan.advice.playsLikeM)} {u.unit}</p>}</div>

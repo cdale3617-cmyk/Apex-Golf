@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { hazardsOnLine, localPoint, planCaddie, greenDistances, mappedLie } from '../src/strategy';
+import { hazardsOnLine, localPoint, planCaddie, greenDistances, greenCentre, mappedLie } from '../src/strategy';
 import { startHole, nextShot, playingKey, usableBall } from '../src/round-state';
 import { clubStats, parseNote } from '../src/caddie';
 import { caddieCall } from '../src/caddie-call';
@@ -10,6 +10,15 @@ const hole: Hole = {id:'h', courseId:'c',number:1,par:5,handicap:1,centerM:500,f
   shape:{path:[[0,0],[0,500]],green:box(-10,490,20,20),fairways:[],water:[],bunkers:[]}};
 const club = (id:string,carryM:number):Club => ({id,name:id,type:id==='Driver'?'Driver':'Iron',carryM,totalM:carryM+10,loft:30});
 const data = { clubs:[club('Driver',220),club('7 iron',140),club('Wedge',80)], shots:[], profile:null };
+test('green centre follows the outline when the hole line ends at its front edge',()=>{
+ const h={...hole,shape:{...hole.shape!,path:[[0,0],[0,490]] as XY[]}};
+ assert.deepEqual(greenCentre(h),[0,500]);
+ const distances=greenDistances(h,[0,0])!;
+ assert.equal(distances.front,490);
+ assert.equal(distances.center,500);
+ assert.ok(distances.back!>distances.center);
+ assert.deepEqual(planCaddie(h,startHole(h,'r'),data,'m').distances?.point,[0,500]);
+});
 test('briefing leads with mapped hazards and repeats the selected club plan',()=>{
  const h={...hole,shape:{...hole.shape!,water:[box(-40,195,80,45)]}};
  const playing=startHole(h,'r'), plan=planCaddie(h,playing,data,'m');

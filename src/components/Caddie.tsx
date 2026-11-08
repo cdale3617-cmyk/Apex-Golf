@@ -7,7 +7,7 @@ import type { PlayingState } from '../round-state';
 import { useUnits } from '../units';
 import { Button, Field, Input, Select } from '../ui';
 
-export function Caddie({ plan, playing, onChange }: { plan: CaddiePlan; playing: PlayingState; onChange: (patch: Partial<PlayingState>) => void }) {
+export function Caddie({ plan, playing, hasClubs, onChange }: { plan: CaddiePlan; playing: PlayingState; hasClubs: boolean; onChange: (patch: Partial<PlayingState>) => void }) {
   const u = useUnits();
   const call = caddieCall(plan, playing);
   const [note, setNote] = useState('');
@@ -38,7 +38,7 @@ export function Caddie({ plan, playing, onChange }: { plan: CaddiePlan; playing:
   };
   return <div className="stack">
     <div className="caddie-call" aria-live="polite"><span className="eyebrow">Apex Caddie · shot {playing.shot}</span>
-      <h2>{plan.advice?.club ?? (playing.lie === 'Green' ? 'Putter' : plan.distanceM === null ? 'Where is your ball?' : 'Choose a clear target')}</h2>
+      <h2>{plan.advice?.club ?? (playing.lie === 'Green' ? 'Putter' : plan.distanceM === null ? 'Where is your ball?' : !hasClubs ? 'Set up your bag' : 'Choose a clear target')}</h2>
       <p>{call}</p>
     </div>
     {canListen() && <Button variant="primary" onClick={talk}>{listening ? 'Listening… tap to send' : 'Talk to your caddie'}</Button>}

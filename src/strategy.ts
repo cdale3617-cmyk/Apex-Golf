@@ -33,12 +33,24 @@ export const along = (a: XY, b: XY, m: number): XY => {
   const length = distance(a, b);
   return length ? [a[0] + (b[0] - a[0]) * m / length, a[1] + (b[1] - a[1]) * m / length] : a;
 };
-export function greenDistances(hole: Hole, ball: XY | null) {
-  const path = hole.shape?.path;
-  if (!ball || !path?.length) return null;
-  const center = path[path.length - 1];
+export function greenCentre(hole: Hole): XY | null {
   const ring = hole.shape?.green;
-  return { center: distance(ball, center), front: ring?.length ? Math.min(...ring.map(p => distance(ball, p))) : null,
+  let area = 0, x = 0, y = 0;
+  for (let i = 0; ring && i < ring.length; i++) {
+    const a = ring[i], b = ring[(i + 1) % ring.length];
+    const cross = a[0] * b[1] - b[0] * a[1];
+    area += cross;
+    x += (a[0] + b[0]) * cross;
+    y += (a[1] + b[1]) * cross;
+  }
+  if (Math.abs(area) > 0.01) return [x / (3 * area), y / (3 * area)];
+  return hole.shape?.path.at(-1) ?? null;
+}
+export function greenDistances(hole: Hole, ball: XY | null) {
+  const center = greenCentre(hole);
+  if (!ball || !center) return null;
+  const ring = hole.shape?.green;
+  return { center: distance(ball, center), front: ring?.length ? edgeDistance(ball, ring) : null,
     back: ring?.length ? Math.max(...ring.map(p => distance(ball, p))) : null, point: center };
 }
 export function mappedLie(hole: Hole, p: XY): string {
