@@ -64,6 +64,9 @@ if not picture.startswith(b"\xff\xd8"):
 print(f"Google satellite session, viewport and JPEG verified at Yeppoon, zoom {zoom}.")
 notes = f"""Google satellite APK for owner testing
 
+Removed the 3D Photo tab and its photo converter. Navigation is Home, Play, Score and Bag.
+Existing saved pictures, courses, clubs, scores and Capricorn mapping are retained in app storage.
+
 Capricorn now uses only the 18-hole Championship routing, excluding the closed Resort layout.
 Opening a previously mixed Capricorn course repairs its maps offline and backs up the old mapping.
 Scores, clubs and photos stay saved. Old local marker/target coordinates are cleared.

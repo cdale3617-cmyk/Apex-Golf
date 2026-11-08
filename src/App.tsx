@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Briefcase, ClipboardList, Crosshair, House, UserRound, Wand2 } from "lucide-react";
+import { Briefcase, ClipboardList, Crosshair, House, UserRound } from "lucide-react";
 import { Button, Seg, Toaster, toast } from "./ui";
 import { useUnits } from "./units";
 import { ProfileSheet } from "./components/ProfileSheet";
@@ -7,15 +7,13 @@ import Home from "./pages/Home";
 import Play from "./pages/Play";
 import Score from "./pages/Score";
 import Bag from "./pages/Bag";
-import Photo from "./pages/Photo";
 
-export type Tab = "home" | "play" | "score" | "bag" | "photo";
+export type Tab = "home" | "play" | "score" | "bag";
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: "home", label: "Home", icon: <House size={20} /> },
   { id: "play", label: "Play", icon: <Crosshair size={20} /> },
   { id: "score", label: "Score", icon: <ClipboardList size={20} /> },
   { id: "bag", label: "Bag", icon: <Briefcase size={20} /> },
-  { id: "photo", label: "3D Photo", icon: <Wand2 size={20} /> },
 ];
 
 export default function App() {
@@ -30,7 +28,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    const f = () => toast("Phone storage is full. Delete some saved 3D photos.");
+    const f = () => toast("Phone storage is full. Changes could not be saved. Free some space and try again.");
     window.addEventListener("apex-storage-full", f);
     return () => window.removeEventListener("apex-storage-full", f);
   }, []);
@@ -53,7 +51,6 @@ export default function App() {
         {tab === "play" ? <Play go={go} /> : null}
         {tab === "score" ? <Score go={go} /> : null}
         {tab === "bag" ? <Bag /> : null}
-        {tab === "photo" ? <Photo /> : null}
       </main>
       <nav className="nav" aria-label="Main">
         {TABS.map((t) => (
