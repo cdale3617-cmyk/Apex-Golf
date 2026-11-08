@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { parseNote } from '../caddie';
+import { caddieCall } from '../caddie-call';
 import { canListen, canSpeak, listen, speak, stopSpeaking } from '../voice';
 import type { CaddiePlan } from '../strategy';
 import type { PlayingState } from '../round-state';
@@ -8,6 +9,7 @@ import { Button, Field, Input, Select } from '../ui';
 
 export function Caddie({ plan, playing, onChange }: { plan: CaddiePlan; playing: PlayingState; onChange: (patch: Partial<PlayingState>) => void }) {
   const u = useUnits();
+  const call = caddieCall(plan, playing);
   const [note, setNote] = useState('');
   const [listening, setListening] = useState(false);
   const [error, setError] = useState('');
@@ -18,7 +20,7 @@ export function Caddie({ plan, playing, onChange }: { plan: CaddiePlan; playing:
   // Speak the same freshly computed plan that is on screen, after shared state updates.
   useEffect(() => {
     stopSpeaking();
-    if (readNext && plan.advice) speak(plan.advice.lines.map(l => `${l.label}: ${l.text}`).join(' ') + ' ' + plan.warnings.join(' '));
+    if (readNext) speak(call);
     setReadNext(false);
   }, [plan]);
   const apply = (words: string) => {
@@ -35,9 +37,9 @@ export function Caddie({ plan, playing, onChange }: { plan: CaddiePlan; playing:
       onError: m => { if (alive.current) setError(m); }, onEnd: () => { if (alive.current) { setListening(false); if (words) apply(words); } } });
   };
   return <div className="stack">
-    <div className="caddie-call" aria-live="polite"><span className="eyebrow">Your caddie · shot {playing.shot}</span>
+    <div className="caddie-call" aria-live="polite"><span className="eyebrow">Apex Caddie · shot {playing.shot}</span>
       <h2>{plan.advice?.club ?? (playing.lie === 'Green' ? 'Putter' : plan.distanceM === null ? 'Where is your ball?' : 'Choose a clear target')}</h2>
-      <p>{plan.advice?.lines.find(l => l.label === 'Plan' || l.label === 'Club')?.text ?? 'Set the ball on the map, use GPS, or enter your remaining distance.'}</p>
+      <p>{call}</p>
     </div>
     {canListen() && <Button variant="primary" onClick={talk}>{listening ? 'Listening… tap to send' : 'Talk to your caddie'}</Button>}
     {error && <p className="err">{error}</p>}
@@ -47,7 +49,7 @@ export function Caddie({ plan, playing, onChange }: { plan: CaddiePlan; playing:
       <Field label="Tell me distance, lie or stance"><Input value={note} onChange={e => setNote(e.target.value)} placeholder="150 metres, heavy rough"/></Field>
       <Button onClick={() => apply(note)}>Update advice</Button>
     </div></details>
-    {canSpeak() && plan.advice && <Button onClick={() => { stopSpeaking(); speak(plan.advice!.lines.map(l => `${l.label}: ${l.text}`).join(' ') + ' ' + plan.warnings.join(' ')); }}>Read advice aloud</Button>}
+    {canSpeak() && <Button onClick={() => { stopSpeaking(); speak(call); }}>Read advice aloud</Button>}
     {plan.advice && <details><summary>Shot plan and reasons</summary><div className="advice">{plan.advice.lines.map(l => <p key={l.label}><b>{l.label}:</b> {l.text}</p>)}</div></details>}
     <details><summary>What the caddie knows</summary>{plan.warnings.map(w => <p className="muted" key={w}>{w}</p>)}</details>
   </div>;

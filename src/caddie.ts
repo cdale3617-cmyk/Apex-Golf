@@ -65,6 +65,8 @@ export function parseNote(note: string, unit: Unit): { distanceM?: number; lie?:
   else if (/heavy rough|thick rough|deep rough/.test(t)) out.lie = "Heavy rough";
   else if (/rough/.test(t)) out.lie = "Light rough";
   else if (/hardpan|bare lie/.test(t)) out.lie = "Bare lie / hardpan";
+  else if (/\bon (?:the )?green\b/.test(t)) out.lie = "Green";
+  else if (/\bfairway\b/.test(t)) out.lie = "Fairway";
   else if (/\btee\b/.test(t)) out.lie = "Tee";
   if (/above (my )?feet/.test(t)) out.stance = "Ball above feet";
   else if (/below (my )?feet/.test(t)) out.stance = "Ball below feet";
@@ -136,10 +138,8 @@ export function advise(a: Ask): Advice {
     clubLine = pick.c.name + ", full swing. It is short of the " + conv(need) + " " + u + " you need, so play for the best spot to hit from next.";
   } else {
     const pct = (pick.carry - need) / need;
-    const lower = reach > 0 ? bag[reach - 1] : null;
     const swing = pct >= 0.08 ? "three-quarter swing, smooth tempo" : pct >= 0.03 ? "smooth full swing" : "full swing";
     clubLine = pick.c.name + ", " + swing + ".";
-    if (lower && (need - lower.carry) / need <= 0.04) clubLine += " A hard " + lower.c.name + " would also get there.";
   }
 
   // Aim.

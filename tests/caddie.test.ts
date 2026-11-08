@@ -3,12 +3,25 @@ import assert from 'node:assert/strict';
 import { hazardsOnLine, localPoint, planCaddie, greenDistances, mappedLie } from '../src/strategy';
 import { startHole, nextShot, playingKey, usableBall } from '../src/round-state';
 import { clubStats, parseNote } from '../src/caddie';
+import { caddieCall } from '../src/caddie-call';
 import type { Club, Hole, Shot, XY } from '../src/store';
 const box = (x:number,y:number,w:number,h:number): XY[] => [[x,y],[x+w,y],[x+w,y+h],[x,y+h]];
 const hole: Hole = {id:'h', courseId:'c',number:1,par:5,handicap:1,centerM:500,frontM:490,backM:510,windKmh:0,windDir:'N',tempC:20,elevationM:0,bearing:0,mapBearing:0,tee:{lat:-23,lon:150},weatherAt:Date.now(),slopeKnown:true,
   shape:{path:[[0,0],[0,500]],green:box(-10,490,20,20),fairways:[],water:[],bunkers:[]}};
 const club = (id:string,carryM:number):Club => ({id,name:id,type:id==='Driver'?'Driver':'Iron',carryM,totalM:carryM+10,loft:30});
 const data = { clubs:[club('Driver',220),club('7 iron',140),club('Wedge',80)], shots:[], profile:null };
+test('briefing leads with mapped hazards and repeats the selected club plan',()=>{
+ const h={...hole,shape:{...hole.shape!,water:[box(-40,195,80,45)]}};
+ const playing=startHole(h,'r'), plan=planCaddie(h,playing,data,'m');
+ const call=caddieCall(plan,playing);
+ assert.ok(call.startsWith('Water'));
+ assert.ok(call.includes(plan.advice!.lines.find(line=>line.label==='Plan')!.text));
+ assert.ok(!call.includes('Driver'));
+ const waiting=nextShot(playing);
+ assert.ok(caddieCall(planCaddie(h,waiting,data,'m'),waiting).startsWith('Set your ball position'));
+ assert.equal(parseNote('on the green','m').lie,'Green');
+ assert.equal(parseNote('in the fairway','m').lie,'Fairway');
+});
 test('next shot clears old tee distances until the new ball is set',()=>{
  const p=nextShot(startHole(hole,'r')); assert.equal(p.shot,2);assert.equal(p.ball,null);
  const plan=planCaddie(hole,p,data,'m');assert.equal(plan.distanceM,null);assert.equal(plan.advice,null);
