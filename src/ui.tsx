@@ -13,7 +13,7 @@ export function Button({ variant = "secondary", size = "md", loading, className,
   );
 }
 
-export function Sheet({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: string; children: React.ReactNode }) {
+export function Sheet({ open, onClose, title, children, footer }: { open: boolean; onClose: () => void; title: string; children: React.ReactNode; footer?: React.ReactNode }) {
   useEffect(() => {
     if (!open) return;
     const k = (e: KeyboardEvent) => {
@@ -32,7 +32,8 @@ export function Sheet({ open, onClose, title, children }: { open: boolean; onClo
             <X size={20} />
           </Button>
         </div>
-        {children}
+        <div className="sheet-body stack">{children}</div>
+        {footer&&<div className="sheet-footer">{footer}</div>}
       </div>
     </div>
   );

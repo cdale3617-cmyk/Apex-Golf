@@ -80,6 +80,7 @@ export function hazardsOnLine(hole: Hole, ball: XY, target: XY, buffer = 12): Ha
 }
 export interface CaddiePlan {
   advice: Advice | null; warnings: string[]; hazards: Hazard[]; plannedTarget: XY | null;
+  aimPoint: XY | null;
   distances: ReturnType<typeof greenDistances>; distanceM: number | null; status: string;
 }
 export function planCaddie(hole: Hole, playing: PlayingState, data: Pick<State, 'clubs' | 'shots' | 'profile'>, unit: 'm' | 'yd', now = Date.now(), target: 'F' | 'C' | 'B' = 'C'): CaddiePlan {
@@ -98,9 +99,9 @@ export function planCaddie(hole: Hole, playing: PlayingState, data: Pick<State, 
   const manual = playing.remainingM !== null && Number.isFinite(playing.remainingM) && playing.remainingM > 0;
   const base = manual ? playing.remainingM : ball && destination ? distance(ball, destination) : playing.source === 'tee' ? (target === 'F' ? hole.frontM : target === 'B' ? hole.backM : hole.centerM) : null;
   const status = manual ? 'Manual remaining distance' : playing.source === 'gps' && ball ? `GPS ±${Math.round(playing.accuracyM!)} m` : playing.source === 'map' ? 'Ball set on map' : playing.source === 'tee' ? 'At the mapped tee / card distance' : 'Set your new ball position';
-  if (base === null || !Number.isFinite(base)) return { advice: null, warnings, hazards: [], plannedTarget: null, distances: ds, distanceM: null, status };
-  if (playing.lie === 'Green') return { advice: null, warnings: [...warnings, 'On the green: read the slope and pace, then use your putter. GPS is not precise enough to read a putt.'], hazards: [], plannedTarget: destination, distances: ds, distanceM: base, status: 'On the green — putter' };
-  if (base < 3) return { advice: null, warnings: [...warnings, 'On or beside the target. Read the green and choose your putt or short chip.'], hazards: [], plannedTarget: destination, distances: ds, distanceM: base, status };
+  if (base === null || !Number.isFinite(base)) return { advice: null, warnings, hazards: [], plannedTarget: null, aimPoint: null, distances: ds, distanceM: null, status };
+  if (playing.lie === 'Green') return { advice: null, warnings: [...warnings, 'On the green: read the slope and pace, then use your putter. GPS is not precise enough to read a putt.'], hazards: [], plannedTarget: destination, aimPoint: destination, distances: ds, distanceM: base, status: 'On the green — putter' };
+  if (base < 3) return { advice: null, warnings: [...warnings, 'On or beside the target. Read the green and choose your putt or short chip.'], hazards: [], plannedTarget: destination, aimPoint: destination, distances: ds, distanceM: base, status };
   const geo = !!ball && !!destination && !manual;
   if (!geo) warnings.push('Ball geometry is unavailable; hazard clearance and aim cannot be checked.');
   if (!hole.shape?.green?.length) warnings.push('Green edges are unavailable. Front and back card distances are estimates.');
@@ -110,6 +111,7 @@ export function planCaddie(hole: Hole, playing: PlayingState, data: Pick<State, 
     target, lie: playing.lie, stance: playing.stance, distanceM: base, unit, clubs: data.clubs, stats, profile: data.profile });
   // A manual distance alone cannot establish the direction from the ball.
   if (!geo) a.lines = a.lines.filter(l => l.label !== 'Aim');
+  else if(playing.target)a.lines=a.lines.map(line=>line.label==='Aim'?{label:'Aim',text:'Use the yellow target line for your chosen landing spot.'}:line);
   const hazards = geo ? hazardsOnLine(hole, ball!, destination!, Math.max(12, playing.accuracyM ?? 0)) : [];
   const fmt = (m: number) => Math.round(unit === 'yd' ? m / 0.9144 : m) + ' ' + unit;
   let plannedTarget = geo ? destination : null;
@@ -151,5 +153,5 @@ export function planCaddie(hole: Hole, playing: PlayingState, data: Pick<State, 
   if (hazards.length) a.lines.push({ label: 'Hazards', text: hazards.map(h => `${h.kind}: near ${fmt(h.nearM)}, clear beyond ${fmt(h.farM)}`).join('. ') + '. Includes a lateral margin.' });
   else if (geo) a.lines.push({ label: 'Hazards', text: 'No mapped water or bunker intersects this line. This does not confirm a clear shot.' });
   a.lines.unshift({ label: 'Shot', text: `${playing.shot}${playing.shot === 1 ? ' — tee shot' : ' — ' + playing.lie.toLowerCase()}. ${status}.` });
-  return { advice: a, warnings, hazards, plannedTarget, distances: ds, distanceM: base, status };
+  return { advice: a, warnings, hazards, plannedTarget, aimPoint: geo?destination:null, distances: ds, distanceM: base, status };
 }

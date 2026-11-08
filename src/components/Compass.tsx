@@ -141,17 +141,17 @@ export function Compass({ hole }: { hole: Hole }) {
       <div className="muted" style={{ fontSize: "0.78rem", lineHeight: 1.3 }}>
         {bearing !== null ? (
           <p>
-            <b style={{ color: "var(--goldink)" }}>Gold</b> = the hole, {Math.round(bearing)}° {dirName(bearing)}
+            <b style={{ color: "var(--goldink)" }}>Gold arrow</b> · shot line {Math.round(bearing)}° {dirName(bearing)}
           </p>
         ) : (
           <p>Hole direction not known. Load the course from the map to add it, or set it with Edit.</p>
         )}
         {windFrom !== null ? (
           <p>
-            <b style={{ color: "var(--info)" }}>Blue</b> = wind {hole.windKmh} km/h from {hole.windDir}
+            <b style={{ color: "var(--info)" }}>Wind arrow</b> · {hole.windKmh} km/h from {hole.windDir}
           </p>
         ) : (
-          <p>No wind right now.</p>
+          <p>Wind calm or unavailable.</p>
         )}
         {guide ? <p style={{ fontSize: "0.9rem", fontWeight: 700, color: "var(--ink)" }}>{guide}</p> : null}
       </div>
@@ -165,7 +165,7 @@ export function Compass({ hole }: { hole: Hole }) {
         </Button>
       ) : (
         <p className="muted" style={{ fontSize: "0.78rem" }}>
-          {status === "denied" ? "Compass access was refused. Allow motion sensors in the phone settings." : "This phone has no compass sensor, so the dial stays north-up."}
+          {status === "denied" ? "Compass access was refused. Allow motion sensors in the phone settings." : "Compass heading unavailable here. The dial shows the mapped shot direction north-up."}
         </p>
       )}
     </div>

@@ -19,6 +19,7 @@ export default function Home({ go }: { go: (t: Tab) => void }) {
   const course = d.courses.find((c) => c.id === active?.courseId) ?? d.courses[0];
   const first = d.holes.filter((h) => h.courseId === course?.id).sort((a, b) => a.number - b.number)[0];
   const recent = d.rounds.filter((r) => r.status === "Complete").slice(0, 3);
+  const welcome=<section className="home-hero"><img src="apex-compass.svg" alt="Apex Golf compass emblem"/><p className="eyebrow">APEX GOLF</p><h2>Your caddie. Every shot.</h2><p>Course, clubs and a clear plan.</p></section>;
 
   useEffect(() => {
     if (course) void refreshWeather(course.id);
@@ -27,6 +28,7 @@ export default function Home({ go }: { go: (t: Tab) => void }) {
   if (!course) {
     return (
       <>
+        {welcome}
         <Empty
           title="Welcome to APEX Golf"
           text="Load your course and your caddie gets to work: distances, wind, club calls and scoring. Everything is saved on this phone."
@@ -46,6 +48,7 @@ export default function Home({ go }: { go: (t: Tab) => void }) {
 
   return (
     <div className="stack">
+      {welcome}
       {active && t ? (
         <Panel title="Round in progress">
           <b style={{ fontSize: "1.1rem" }}>{course.name}</b>

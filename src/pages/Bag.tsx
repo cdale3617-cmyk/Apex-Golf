@@ -3,29 +3,37 @@ import { Pencil, Plus, Trash2 } from "lucide-react";
 import { MIN_SHOTS, clubStats, tendency } from "../caddie";
 import { STANDARD_BAG, actions, useData, type Club, type ClubType } from "../store";
 import { useUnits } from "../units";
-import { Button, Empty, Field, Input, Panel, Select, Sheet } from "../ui";
+import { Button, Empty, Field, Input, Panel, Select, Sheet, toast } from "../ui";
 
 const TYPES: ClubType[] = ["Driver", "Wood", "Hybrid", "Iron", "Wedge", "Putter"];
 
 function ClubSheet({ club, open, onClose }: { club: Club | null; open: boolean; onClose: () => void }) {
   const u = useUnits();
   const [f, setF] = useState({ name: "", type: "Iron", loft: "", carry: "", total: "" });
+  const [error,setError]=useState('');
   const set = (k: keyof typeof f) => (v: string) => setF((s) => ({ ...s, [k]: v }));
   useEffect(() => {
     if (!open) return;
+    setError('');
     setF(club ? { name: club.name, type: club.type, loft: String(club.loft), carry: String(u.d(club.carryM)), total: String(u.d(club.totalM)) } : { name: "", type: "Iron", loft: "", carry: "", total: "" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, club?.id]);
   const save = () => {
-    if (!f.name.trim()) return;
-    actions.saveClub({
+    if (!f.name.trim()) return setError('Enter a club name.');
+    const carry=f.type==='Putter'?0:u.fromInput(f.carry),total=f.type==='Putter'?0:f.total.trim()?u.fromInput(f.total):carry;
+    if(f.type!=='Putter'&&(!Number.isFinite(carry)||carry<=0||carry>400))return setError('Enter a carry between 1 and 400 metres, or the equivalent in yards.');
+    if(!Number.isFinite(total)||total<carry)return setError('Total distance must be at least the carry distance.');
+    const saved=actions.saveClub({
       id: club?.id, name: f.name.trim(), type: f.type as ClubType, loft: Number(f.loft) || 0,
-      carryM: u.fromInput(f.carry), totalM: f.total.trim() ? u.fromInput(f.total) : u.fromInput(f.carry),
+      carryM: carry, totalM: total,
     });
+    if(!saved)return setError('Phone storage is full. Free some space, then tap Save club again.');
     onClose();
+    toast('Club saved.');
   };
   return (
-    <Sheet open={open} onClose={onClose} title={club ? "Edit club" : "Add a club"}>
+    <Sheet open={open} onClose={onClose} title={club ? "Edit club" : "Add a club"} footer={<Button variant="primary" className="btn-block" onClick={save}>Save club</Button>}>
+      {error&&<p className="err" role="alert">{error}</p>}
       <Field label="Name">
         <Input value={f.name} onChange={(e) => set("name")(e.target.value)} placeholder="7 Iron" />
       </Field>
@@ -43,9 +51,6 @@ function ClubSheet({ club, open, onClose }: { club: Club | null; open: boolean; 
           <Input type="number" inputMode="numeric" value={f.total} onChange={(e) => set("total")(e.target.value)} />
         </Field>
       </div>
-      <Button variant="primary" className="btn-block" onClick={save}>
-        Save club
-      </Button>
     </Sheet>
   );
 }

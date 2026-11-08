@@ -19,10 +19,9 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
 ];
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>(() => {
-    const t = localStorage.getItem("apex_tab") ?? "";
-    return (TABS.some((x) => x.id === t) ? t : "home") as Tab;
-  });
+  const [tab, setTab] = useState<Tab>('home');
+  const [appearance,setAppearance]=useState(()=>localStorage.getItem('apex_appearance')==='night'?'night':'day');
+  useEffect(()=>{document.documentElement.dataset.appearance=appearance;localStorage.setItem('apex_appearance',appearance);},[appearance]);
   const [profile, setProfile] = useState(false);
   const u = useUnits();
   const go = (t: Tab) => {
@@ -39,6 +38,7 @@ export default function App() {
   return (
     <div className="app">
       <header className="top">
+        <img src="apex-compass.svg" className="brand-icon" alt="Apex compass"/>
         <h1>
           APEX <span>Golf</span>
         </h1>
@@ -47,6 +47,7 @@ export default function App() {
           <UserRound size={20} />
         </Button>
       </header>
+      <div className="appearance"><span>Anti-glare</span><Seg label="Anti-glare palette" value={appearance} onChange={setAppearance} options={[{value:'day',label:'Day'},{value:'night',label:'Night'}]}/></div>
       <main className={tab === "play" ? "fill" : undefined}>
         {tab === "home" ? <Home go={go} /> : null}
         {tab === "play" ? <Play go={go} /> : null}

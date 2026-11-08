@@ -12,6 +12,8 @@ import { ShotLogger } from '../components/ShotLogger';
 import { playingKey, startHole, type PlayingState } from '../round-state';
 import { distance, edgeDistance, localPoint, mappedLie, planCaddie } from '../strategy';
 import { getFix } from '../location';
+import { Compass } from '../components/Compass';
+import { usableBall } from '../round-state';
 function Step({ label, value, min, onChange }: { label: string; value: number; min: number; onChange: (v: number) => void }) {
   return (
     <div className="stepper">
@@ -77,6 +79,7 @@ export default function Play({ go }: { go: (t: Tab) => void }) {
   const [mode, setMode] = useState<MapMode>('target');
   const [target, setTarget] = useState<'F' | 'C' | 'B'>('C');
   const [manual, setManual] = useState(''), [showArt, setShowArt] = useState(false);
+  const [satellite,setSatellite]=useState(()=>localStorage.getItem('apex-map-view')!=='map');
   const [clock, setClock] = useState(Date.now());
   const currentKey = useRef(key); currentKey.current = key;
   useEffect(() => { const t = setInterval(() => setClock(Date.now()), 15000); return () => clearInterval(t); }, []);
@@ -133,17 +136,21 @@ export default function Play({ go }: { go: (t: Tab) => void }) {
   };
   const number = (m: number | null | undefined) => m === null || m === undefined ? '—' : u.d(m);
   const fromTee = playing.source === 'tee' && !plan.distances;
+  const compassBall=usableBall(playing,clock),compassTarget=plan.aimPoint;
+  const compassBearing=compassBall&&compassTarget&&hole.mapBearing!==undefined?(hole.mapBearing+Math.atan2(compassTarget[0]-compassBall[0],compassTarget[1]-compassBall[1])*180/Math.PI+360)%360:hole.bearing;
   return <div className="play">
     <div className="playrow"><div className="name">{course.name}</div><Button size="sm" onClick={() => setFinder(true)}>Courses</Button></div>
     <div className="hole-nav"><Button disabled={index === 0} onClick={() => setIndex(index-1)}>Previous</Button><strong>Hole {hole.number} · Par {hole.par}</strong><Button disabled={index >= holes.length-1} onClick={() => setIndex(index+1)}>Next</Button></div>
+    <div className="map-view-controls"><Button size="sm" aria-pressed={satellite&&!showArt} onClick={()=>{setSatellite(true);setShowArt(false);localStorage.setItem('apex-map-view','satellite');}}>Satellite</Button><Button size="sm" aria-pressed={!satellite&&!showArt} onClick={()=>{setSatellite(false);setShowArt(false);localStorage.setItem('apex-map-view','map');}}>Map</Button></div>
     <div className="pgrid s60">
       <section className="map">
-        {showArt && art ? <><img className="reference-art" src={art} alt="Saved hole artwork"/><p className="art-note">Artwork reference only. Use Map for targets and distances.</p></> : <HoleArt hole={hole} playing={playing} plannedTarget={plan.plannedTarget} mode={mode} onPoint={onPoint}/>}
+        {showArt && art ? <><img className="reference-art" src={art} alt="Saved hole artwork"/><p className="art-note">Artwork reference only. Use Map for targets and distances.</p></> : <HoleArt hole={hole} playing={playing} plannedTarget={plan.plannedTarget} mode={mode} onPoint={onPoint} satellite={satellite} aimPoint={plan.aimPoint}/>}
         <div className="map-caption">{showArt ? 'Artwork' : mode === 'target' ? 'Tap or drag: yellow target' : mode === 'ball' ? 'Tap or drag: your ball' : mode === 'remove' ? 'Tap a hazard to delete' : 'Tap to add a 20 m wide hazard'}</div>
       </section>
       <aside className="aside">
         <Caddie key={"caddie:"+key} plan={plan} playing={playing} hasClubs={d.clubs.some(c => c.type !== 'Putter' && c.carryM > 0)} onChange={change}/>
         {!d.clubs.some(c => c.type !== 'Putter' && c.carryM > 0) && <Button variant="primary" onClick={() => go('bag')}>Set up your bag</Button>}
+        <details className="compass-panel" open><summary>Caddie compass</summary><Compass hole={{...hole,bearing:compassBearing,windKmh:hole.weatherAt&&clock-hole.weatherAt<45*60000?hole.windKmh:0}}/></details>
         <p className="muted">Mapped hazards may be incomplete. Check before playing.</p>
         <Panel title={plan.status}>
           <div className="dist"><div className="l">Target · {u.unit}</div><div className="big">{number(plan.distanceM)}</div>{plan.advice && <p>Plays like {u.d(plan.advice.playsLikeM)} {u.unit}</p>}</div>

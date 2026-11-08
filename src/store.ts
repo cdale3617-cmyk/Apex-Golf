@@ -44,6 +44,7 @@ const subs = new Set<() => void>();
 
 function commit(next: State) {
   state = next;
+  let saved=true;
   try {
     const { conversions, ...rest } = next;
     localStorage.setItem(KEY, JSON.stringify(rest));
@@ -52,9 +53,11 @@ function commit(next: State) {
       savedPhotos = conversions;
     }
   } catch {
+    saved=false;
     window.dispatchEvent(new Event("apex-storage-full"));
   }
   subs.forEach((f) => f());
+  return saved;
 }
 
 const update = (fn: (s: State) => State) => commit(fn(state));
@@ -125,7 +128,10 @@ export const actions = {
     }));
   },
   saveClub(c: Omit<Club, "id"> & { id?: string }) {
-    update((s) => ({ ...s, clubs: c.id ? s.clubs.map((k) => (k.id === c.id ? ({ ...c, id: c.id } as Club) : k)) : [...s.clubs, { ...c, id: uid() }] }));
+    const previous=state;
+    const saved=update((s) => ({ ...s, clubs: c.id ? s.clubs.map((k) => (k.id === c.id ? ({ ...c, id: c.id } as Club) : k)) : [...s.clubs, { ...c, id: uid() }] }));
+    if(!saved){state=previous;subs.forEach(listener=>listener());}
+    return saved;
   },
   addClubs(list: Omit<Club, "id">[]) {
     update((s) => ({ ...s, clubs: [...s.clubs, ...list.map((c) => ({ ...c, id: uid() }))] }));
