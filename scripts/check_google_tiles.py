@@ -1,5 +1,4 @@
 """CI smoke test using the APK's actual package and signing identity. Never log URLs."""
-import hashlib
 import json
 import math
 import os
@@ -13,11 +12,17 @@ import urllib.parse
 key = os.environ.get("GOOGLE_MAPS_API_KEY", "").strip()
 if not key:
     sys.exit("GOOGLE_MAPS_API_KEY repository secret is missing")
-cert = subprocess.check_output([
-    "keytool", "-exportcert", "-alias", "androiddebugkey", "-keystore",
-    str(Path.home() / ".android/debug.keystore"), "-storepass", "android",
-], stderr=subprocess.DEVNULL)
-sha = hashlib.sha1(cert).hexdigest().upper()
+sdk = Path(os.environ.get("ANDROID_HOME", os.environ.get("ANDROID_SDK_ROOT", "/usr/local/lib/android/sdk")))
+signers = sorted(sdk.glob("build-tools/*/apksigner"), reverse=True)
+if not signers:
+    sys.exit("Android APK signature verifier is unavailable")
+result = subprocess.run([
+    str(signers[0]), "verify", "--print-certs", "android/app/build/outputs/apk/debug/app-debug.apk",
+], capture_output=True, text=True)
+match = re.search(r"Signer #1 certificate SHA-1 digest: ([0-9a-fA-F]{40})", result.stdout)
+if result.returncode or not match:
+    sys.exit("Could not verify the APK signing certificate")
+sha = match.group(1).upper()
 fingerprint = ":".join(re.findall("..", sha))
 headers = {"X-Android-Package": "com.apexgolf.caddie", "X-Android-Cert": sha}
 
