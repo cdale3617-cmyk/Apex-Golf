@@ -5,6 +5,10 @@ on:
   push:
     branches: [main]
 
+concurrency:
+  group: android-main
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
@@ -28,7 +32,10 @@ jobs:
           java-version: "21"
 
       - name: Install packages
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
+
+      - name: Test caddie decisions and shared round state
+        run: npm test
 
       - name: Check the code and build the web app
         run: npm run build
@@ -59,5 +66,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cp android/app/build/outputs/apk/debug/app-debug.apk APEX-Golf.apk
-          gh release delete latest --yes --cleanup-tag || true
-          gh release create latest APEX-Golf.apk --title "APEX Golf (latest build)" --notes "Download APEX-Golf.apk on your Android phone and open it to install." --target main
+          gh release create "build-${GITHUB_RUN_NUMBER}" APEX-Golf.apk --title "APEX Golf — caddie build ${GITHUB_RUN_NUMBER}" --notes "Shared shot state, GPS ball position, draggable target and mapped hazard checks. Download APEX-Golf.apk. Confirm GPS and speech on your phone before course use." --target "$GITHUB_SHA" --latest

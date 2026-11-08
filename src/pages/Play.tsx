@@ -1,21 +1,17 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, Flag, Mountain, PanelRight, Pencil, RefreshCw, Search, Thermometer, Wind } from "lucide-react";
-import type { Tab } from "../App";
-import { advise, clubStats } from "../caddie";
-import { redrawCourse, refreshWeather } from "../courses";
-import { actions, useData, type Hole, type Round } from "../store";
-import { useUnits } from "../units";
-import { Button, Empty, Panel, Select, toast } from "../ui";
-import { Caddie } from "../components/Caddie";
-import { Compass } from "../components/Compass";
-import { CourseFinder } from "../components/CourseFinder";
-import { HoleArt } from "../components/HoleArt";
-import { HoleEditor } from "../components/HoleEditor";
-import { ShotLogger } from "../components/ShotLogger";
-
-type Target = "F" | "C" | "B";
-type Split = 50 | 60 | 70;
-
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import type { Tab } from '../App';
+import { redrawCourse, refreshWeather } from '../courses';
+import { actions, getState, useData, type Hole, type Round, type XY } from '../store';
+import { useUnits } from '../units';
+import { Button, Empty, Field, Input, Panel, Select, Sheet, toast } from '../ui';
+import { Caddie } from '../components/Caddie';
+import { CourseFinder } from '../components/CourseFinder';
+import { HoleArt, type MapMode } from '../components/HoleArt';
+import { HoleEditor } from '../components/HoleEditor';
+import { ShotLogger } from '../components/ShotLogger';
+import { playingKey, startHole, type PlayingState } from '../round-state';
+import { distance, edgeDistance, localPoint, mappedLie, planCaddie } from '../strategy';
+import { getFix } from '../location';
 function Step({ label, value, min, onChange }: { label: string; value: number; min: number; onChange: (v: number) => void }) {
   return (
     <div className="stepper">
@@ -30,12 +26,13 @@ function Step({ label, value, min, onChange }: { label: string; value: number; m
 }
 
 /** Strokes, putts and fairway for this hole of the round in progress. */
-function ScoreStep({ round, hole, last, onNext }: { round: Round; hole: Hole; last: boolean; onNext: () => void }) {
+function ScoreStep({ round, hole, last, onNext, suggestedStrokes }: { round: Round; hole: Hole; suggestedStrokes: number; last: boolean; onNext: () => void }) {
   const d = useData();
   const have = d.scores.find((s) => s.roundId === round.id && s.holeNumber === hole.number);
-  const [strokes, setStrokes] = useState(have?.strokes ?? hole.par);
+  const [strokes, setStrokes] = useState(have?.strokes ?? Math.max(1, suggestedStrokes));
   const [putts, setPutts] = useState(have?.putts ?? 2);
   const [fir, setFir] = useState(have?.fairwayHit ?? false);
+  useEffect(() => { if (!have) setStrokes(Math.max(1, suggestedStrokes)); }, [suggestedStrokes, have]);
   return (
     <Panel title={"Score, hole " + hole.number}>
       <Step label="Strokes" value={strokes} min={1} onChange={setStrokes} />
@@ -51,6 +48,7 @@ function ScoreStep({ round, hole, last, onNext }: { round: Round; hole: Hole; la
         size="sm"
         className="btn-block"
         onClick={() => {
+          if (putts > strokes) return toast("Putts cannot exceed strokes.");
           actions.saveScore(round.id, hole.number, { strokes, putts, fairwayHit: hole.par > 3 && fir });
           toast("Hole " + hole.number + ": " + strokes + ". Saved.");
           if (!last) onNext();
@@ -63,215 +61,116 @@ function ScoreStep({ round, hole, last, onNext }: { round: Round; hole: Hole; la
 }
 
 export default function Play({ go }: { go: (t: Tab) => void }) {
-  const d = useData();
-  const u = useUnits();
-  const active = d.rounds.find((r) => r.status === "In progress");
+  const d = useData(), u = useUnits();
+  const active = d.rounds.find(r => r.status === 'In progress');
   const [courseId, setCourseId] = useState<string | null>(null);
-  const course = d.courses.find((c) => c.id === courseId) ?? d.courses.find((c) => c.id === active?.courseId) ?? d.courses[0];
-  const holes = useMemo(() => d.holes.filter((h) => h.courseId === course?.id).sort((a, b) => a.number - b.number), [d.holes, course?.id]);
+  const course = d.courses.find(c => c.id === courseId) ?? d.courses.find(c => c.id === active?.courseId) ?? d.courses[0];
+  const holes = useMemo(() => d.holes.filter(h => h.courseId === course?.id).sort((a,b) => a.number - b.number), [d.holes, course?.id]);
   const [index, setIndex] = useState(0);
-  const [target, setTarget] = useState<Target>("C");
-  const [finder, setFinder] = useState(false);
-  const [editing, setEditing] = useState(false);
-  const [updating, setUpdating] = useState(false);
-  const swipeX = useRef<number | null>(null);
-  const jumped = useRef(false);
-  // How wide the hole picture is: 50, 60 or 70 percent. Remembered on this phone.
-  const [split, setSplit] = useState<Split>(() => {
-    const saved = Number(localStorage.getItem("apex_split"));
-    return saved === 50 || saved === 70 ? saved : 60;
-  });
-  const cycleSplit = () => {
-    const next: Split = split === 60 ? 70 : split === 70 ? 50 : 60;
-    setSplit(next);
-    localStorage.setItem("apex_split", String(next));
-  };
   const hole = holes[Math.min(index, Math.max(0, holes.length - 1))];
-
-  // Keep the wind and temperature fresh.
+  const round = active?.courseId === course?.id ? active : undefined;
+  const key = hole ? playingKey(hole.id, round?.id ?? null) : '';
+  const initial = useMemo(() => hole ? startHole(hole, round?.id ?? null) : null, [hole?.id, round?.id]);
+  const playing = d.playing[key] ?? initial;
+  const [finder, setFinder] = useState(false), [editing, setEditing] = useState(false), [logging, setLogging] = useState(false);
+  const [locating, setLocating] = useState(false), [problem, setProblem] = useState('');
+  const [mode, setMode] = useState<MapMode>('target');
+  const [target, setTarget] = useState<'F' | 'C' | 'B'>('C');
+  const [manual, setManual] = useState(''), [showArt, setShowArt] = useState(false);
+  const [clock, setClock] = useState(Date.now());
+  const currentKey = useRef(key); currentKey.current = key;
+  useEffect(() => { const t = setInterval(() => setClock(Date.now()), 15000); return () => clearInterval(t); }, []);
+  useEffect(() => () => { currentKey.current = ''; }, []);
+  useEffect(() => { setManual(''); setProblem(''); setMode('target'); setShowArt(false); setLogging(false); setLocating(false); setTarget('C'); }, [key]);
+  const tried = useRef(new Set<string>());
   useEffect(() => {
-    if (course) void refreshWeather(course.id);
-  }, [course?.id]);
-
-  // Courses saved before holes were drawn get their real hole shapes, once per launch.
-  const tried = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    if (!course || course.lat === null || tried.current.has(course.id)) return;
-    if (holes.length === 0 || holes.every((h) => h.shape)) return;
-    tried.current.add(course.id);
-    void redrawCourse(course.id).then((ok) => {
-      if (ok) toast("Drew the real holes from the map.");
-    });
+    if (!course) return;
+    void refreshWeather(course.id);
+    if (!tried.current.has(course.id) && holes.some(h => !h.shape || !h.tee)) {
+      tried.current.add(course.id); void redrawCourse(course.id);
+    }
   }, [course?.id, holes.length]);
-
-  // Open on the first hole not scored yet, once, when a round is under way.
-  useEffect(() => {
-    if (jumped.current || !active || !holes.length || active.courseId !== course?.id) return;
-    jumped.current = true;
-    const scored = new Set(d.scores.filter((s) => s.roundId === active.id).map((s) => s.holeNumber));
-    const next = holes.findIndex((h) => !scored.has(h.number));
-    if (next > 0) setIndex(next);
-  }, [active, holes, course, d.scores]);
-
-  const finderSheet = <CourseFinder open={finder} onClose={() => setFinder(false)} onDone={(id) => { setCourseId(id); setIndex(0); }} />;
-
-  if (!course || !hole) {
-    return (
-      <>
-        <Empty
-          title="Load your course"
-          text="Search for a golf course and its holes, distances and today's wind load automatically."
-          action={
-            <Button variant="primary" onClick={() => setFinder(true)}>
-              <Search size={16} /> Find a course
-            </Button>
-          }
-        />
-        {finderSheet}
-      </>
-    );
-  }
-
-  const stats = clubStats(d.clubs, d.shots);
-  const dist = target === "F" ? hole.frontM : target === "B" ? hole.backM : hole.centerM;
-  const call = advise({ hole, target, lie: "Fairway", stance: "Flat", distanceM: null, unit: u.unit, clubs: d.clubs, stats, profile: d.profile });
-  const art = d.conversions.find((c) => c.courseId === hole.courseId && c.holeNumber === hole.number)?.photo;
-  const targetName = target === "F" ? "front" : target === "B" ? "back" : "center";
-
-  return (
-    <div className="play">
-      <div className="playrow">
-        <div className="name">
-          {d.courses.length > 1 ? (
-            <Select value={course.id} label="Course" onChange={(v) => { setCourseId(v); setIndex(0); }} options={d.courses.map((c) => ({ value: c.id, label: c.name }))} />
-          ) : (
-            course.name
-          )}
-        </div>
-        <Button size="sm" onClick={() => setFinder(true)}>
-          <Search size={16} /> Find a course
-        </Button>
-        <Button size="icon" aria-label={"Map width " + split + " percent. Tap to change"} onClick={cycleSplit}>
-          <PanelRight size={18} />
-        </Button>
-      </div>
-
-      <div className={"pgrid s" + split}>
-        <section
-          className="map"
-          onTouchStart={(e) => { swipeX.current = e.touches[0].clientX; }}
-          onTouchEnd={(e) => {
-            if (swipeX.current === null) return;
-            const dx = e.changedTouches[0].clientX - swipeX.current;
-            swipeX.current = null;
-            if (dx < -60 && index < holes.length - 1) setIndex(index + 1);
-            if (dx > 60 && index > 0) setIndex(index - 1);
-          }}
-        >
-          <div className="hud">
-            <button type="button" className="hudbtn" aria-label="Previous hole" disabled={index === 0} onClick={() => setIndex(index - 1)}>
-              <ChevronLeft size={18} />
-            </button>
-            <span className="pill">
-              Hole {hole.number}
-              <small>{index + 1} of {holes.length} · Par {hole.par}</small>
-            </span>
-            <button type="button" className="hudbtn" aria-label="Next hole" disabled={index >= holes.length - 1} onClick={() => setIndex(index + 1)}>
-              <ChevronRight size={18} />
-            </button>
-          </div>
-          <HoleArt hole={hole} route={dist / hole.backM} image={art} label={u.d(hole.centerM * 0.9) + " " + u.unit} />
-        </section>
-
-        <aside className="aside">
-          <Panel>
-            <div className="stat"><Wind size={16} /> {hole.windKmh} km/h {hole.windDir}</div>
-            <div className="stat"><Thermometer size={16} /> {hole.tempC}°C</div>
-            <div className="stat"><Mountain size={16} /> {hole.elevationM > 0 ? "+" : ""}{u.d(hole.elevationM)} {u.unit}</div>
-            <Button size="sm" className="btn-block" onClick={() => setEditing(true)}>
-              <Pencil size={14} /> Edit
-            </Button>
-            {course.lat !== null ? (
-              <Button
-                size="sm"
-                variant="ghost"
-                className="btn-block"
-                loading={updating}
-                onClick={async () => {
-                  setUpdating(true);
-                  const ok = await refreshWeather(course.id, true);
-                  setUpdating(false);
-                  toast(ok ? "Wind and temperature updated." : "Couldn't reach the weather service.");
-                }}
-              >
-                <RefreshCw size={14} /> Update wind
-              </Button>
-            ) : null}
-          </Panel>
-
-          <Panel title="From tee">
-            <div className="dist">
-              <div className="l">Back</div>
-              <div className="mid">{u.d(hole.backM)}</div>
-              <hr />
-              <div className="l">Center</div>
-              <div className="big">{u.d(hole.centerM)}</div>
-              <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--info)" }}>{u.unit === "m" ? "METRES" : "YARDS"}</div>
-              <div className="l">{u.alt(hole.centerM)}</div>
-              <hr />
-              <div className="l">Front</div>
-              <div className="mid">{u.d(hole.frontM)}</div>
-            </div>
-          </Panel>
-
-          <Panel title="Target">
-            <div className="cols3">
-              {(["F", "C", "B"] as Target[]).map((t) => (
-                <Button key={t} size="sm" variant={target === t ? "primary" : "secondary"} aria-pressed={target === t} style={{ paddingInline: 0 }} onClick={() => setTarget(t)}>
-                  {t}
-                </Button>
-              ))}
-            </div>
-          </Panel>
-
-          <Panel>
-            <Compass hole={hole} />
-          </Panel>
-
-          <Panel title="Club call">
-            {call.club ? (
-              <>
-                <b style={{ fontSize: "1.1rem" }}>{call.club}</b>
-                <p className="muted" style={{ fontSize: "0.78rem" }}>
-                  carry {u.d(call.carryM ?? 0)} {u.unit}{call.measured ? " (your shots)" : ""} · {u.d(dist)} {u.unit} to {targetName}
-                </p>
-                <span className={call.reaches ? "badge ok" : "badge warn"}>{call.reaches ? "Good fit" : "Short"}</span>
-              </>
-            ) : (
-              <p className="muted">Add clubs to your bag for a call.</p>
-            )}
-          </Panel>
-
-          {active && active.courseId === course.id ? (
-            <ScoreStep key={active.id + ":" + hole.id} round={active} hole={hole} last={index >= holes.length - 1} onNext={() => setIndex(index + 1)} />
-          ) : (
-            <Panel title="Score">
-              <Button size="sm" className="btn-block" onClick={() => go("score")}>
-                Start a round
-              </Button>
-            </Panel>
-          )}
-
-          <Panel>
-            <Caddie key={hole.id} hole={hole} target={target} />
-          </Panel>
-          <Panel>
-            <ShotLogger hole={hole} />
-          </Panel>
-        </aside>
-      </div>
-      {finderSheet}
-      <HoleEditor hole={hole} open={editing} onClose={() => setEditing(false)} />
+  const plan = useMemo(() => hole && playing ? planCaddie(hole, playing, d, u.unit, clock, target) : null, [hole, playing, d.clubs, d.shots, d.profile, u.unit, clock, target]);
+  const chooseCourse = (id: string) => { setCourseId(id); setIndex(0); };
+  const finderSheet = <CourseFinder open={finder} onClose={() => setFinder(false)} onDone={chooseCourse}/>;
+  if (!hole || !course || !playing || !plan) return <><Empty title="Choose your course" text="Load a course, then your caddie will guide each shot." action={<Button variant="primary" onClick={() => setFinder(true)}>Find a course</Button>}/>{finderSheet}</>;
+  const change = (patch: Partial<PlayingState>) => {
+    const latest = getState().playing[key] ?? playing;
+    actions.setPlaying({ ...latest, ...patch });
+  };
+  const art = d.conversions.find(c => c.courseId === hole.courseId && c.holeNumber === hole.number)?.photo;
+  const gps = async () => {
+    const requestKey = key;
+    setLocating(true); setProblem('');
+    try {
+      if (!hole.tee || hole.mapBearing === undefined) throw new Error('This saved hole has no GPS reference yet. Refresh its map or set the ball manually.');
+      const fix = await getFix();
+      if (currentKey.current !== requestKey) return;
+      const latest = getState().playing[requestKey] ?? playing;
+      if (latest.shot !== playing.shot || latest.locatedAt !== playing.locatedAt || latest.source !== playing.source || latest.remainingM !== playing.remainingM) return;
+      const ball = localPoint(fix, hole.tee, hole.mapBearing);
+      if (distance(ball, hole.shape?.path[0] ?? [0,0]) > Math.max(1000, hole.centerM + 300)) throw new Error('You are too far from this hole. Check the selected course, or set the ball on the map for practice.');
+      change({ ball, lie: mappedLie(hole,ball), source: 'gps', locatedAt: fix.timestamp, accuracyM: fix.accuracy, remainingM: null });
+      setClock(Date.now());
+    } catch (e) { if (currentKey.current === requestKey) setProblem(e instanceof Error ? e.message : 'GPS could not start.'); }
+    finally { if (currentKey.current === requestKey) setLocating(false); }
+  };
+  const onPoint = (p: XY) => {
+    if (!hole.shape) return;
+    if (mode === 'target') change({ target: p, remainingM: null });
+    else if (mode === 'ball') change({ ball: p, lie: mappedLie(hole,p), source: 'map', accuracyM: null, locatedAt: Date.now(), remainingM: null });
+    else {
+      const shape = { ...hole.shape };
+      if (mode === 'remove') {
+        const choices = [...shape.water.map((poly,i) => ({ kind: 'water' as const, i, d: edgeDistance(p,poly) })), ...shape.bunkers.map((poly,i) => ({ kind: 'bunkers' as const, i, d: edgeDistance(p,poly) }))].sort((a,b) => a.d-b.d);
+        if (choices[0]?.d <= 15) { const c = choices[0]; shape[c.kind] = shape[c.kind].filter((_,i) => i !== c.i); }
+      } else {
+        const ring: XY[] = Array.from({ length: 16 }, (_,i) => [p[0] + 10 * Math.cos(i * Math.PI / 8), p[1] + 10 * Math.sin(i * Math.PI / 8)]);
+        const kind = mode === 'water' ? 'water' : 'bunkers'; shape[kind] = [...shape[kind], ring];
+      }
+      actions.updateHole(hole.id, { shape });
+    }
+  };
+  const number = (m: number | null | undefined) => m === null || m === undefined ? '—' : u.d(m);
+  const fromTee = playing.source === 'tee' && !plan.distances;
+  return <div className="play">
+    <div className="playrow"><div className="name">{course.name}</div><Button size="sm" onClick={() => setFinder(true)}>Courses</Button></div>
+    <div className="hole-nav"><Button disabled={index === 0} onClick={() => setIndex(index-1)}>Previous</Button><strong>Hole {hole.number} · Par {hole.par}</strong><Button disabled={index >= holes.length-1} onClick={() => setIndex(index+1)}>Next</Button></div>
+    <div className="pgrid s60">
+      <section className="map">
+        {showArt && art ? <><img className="reference-art" src={art} alt="Saved hole artwork"/><p className="art-note">Artwork reference only. Use Map for targets and distances.</p></> : <HoleArt hole={hole} playing={playing} plannedTarget={plan.plannedTarget} mode={mode} onPoint={onPoint}/>}
+        <div className="map-caption">{showArt ? 'Artwork' : mode === 'target' ? 'Tap or drag: yellow target' : mode === 'ball' ? 'Tap or drag: your ball' : mode === 'remove' ? 'Tap a hazard to delete' : 'Tap to add a 20 m wide hazard'}</div>
+      </section>
+      <aside className="aside">
+        <Caddie key={"caddie:"+key} plan={plan} playing={playing} onChange={change}/>
+        <p className="muted">Mapped hazards may be incomplete. Check before playing.</p>
+        <Panel title={plan.status}>
+          <div className="dist"><div className="l">Target · {u.unit}</div><div className="big">{number(plan.distanceM)}</div>{plan.advice && <p>Plays like {u.d(plan.advice.playsLikeM)} {u.unit}</p>}</div>
+          <div className="green-dist"><span>Front<br/><b>{number(plan.distances?.front ?? (fromTee ? hole.frontM : null))}</b></span><span>Centre<br/><b>{number(plan.distances?.center ?? (fromTee ? hole.centerM : null))}</b></span><span>Back<br/><b>{number(plan.distances?.back ?? (fromTee ? hole.backM : null))}</b></span></div>
+          <Select label="Green target" value={target} onChange={v => { setTarget(v as 'F'|'C'|'B'); change({ target: null }); }} options={[{value:'F',label:'Front'},{value:'C',label:'Centre'},{value:'B',label:'Back'}]}/>
+          <Button loading={locating} onClick={() => void gps()}>Use my GPS</Button>
+          {problem && <p className="err" role="alert">{problem}</p>}
+          <Button variant="primary" onClick={() => { actions.recordStroke(playing); setManual(''); }}>Shot played</Button>
+          <p className="muted">Shot {playing.shot}. After hitting, set your next ball position.</p>
+        </Panel>
+        <details><summary>Ball and map tools</summary><div className="stack">
+          <Button aria-pressed={mode==='ball'} onClick={() => {setMode('ball');setShowArt(false);}}>Set ball on map</Button>
+          <Button aria-pressed={mode==='target'} onClick={() => {setMode('target');setShowArt(false);}}>Move yellow target</Button>
+          <Button onClick={() => { change({ball:hole.shape?.path[0]??null,source:'tee',accuracyM:null,remainingM:null,lie:'Tee',locatedAt:Date.now()}); }}>Ball at tee</Button>
+          <Field label={'Remaining distance ('+u.unit+')'}><Input type="number" inputMode="numeric" value={manual} onChange={e => setManual(e.target.value)} placeholder="To your target"/></Field>
+          <Button onClick={() => {const m = u.fromInput(manual); if (!(m>=3 && m<=1000)) return toast('Enter 3–1000 metres, or the equivalent in yards.'); change({remainingM:m,source:'manual',ball:null,accuracyM:null});}}>Use distance</Button>
+          <Button onClick={() => change({shot:Math.max(1,playing.shot-1)})}>Correct shot count −1</Button>
+          {art && <Button onClick={() => setShowArt(!showArt)}>{showArt?'Show map':'View saved artwork'}</Button>}
+          <Button onClick={() => setEditing(true)}>Edit hole / conditions</Button>
+          <Button onClick={() => void refreshWeather(course.id,true).then(ok=>toast(ok?'Weather updated.':'Weather unavailable.'))}>Refresh weather</Button>
+          <details><summary>Mark or remove hazards</summary><p className="muted">Tap the map to add a 10 m radius water or bunker area. These are approximate marks, saved on this phone.</p>
+          <Button onClick={() => {setMode('water');setShowArt(false);}}>Mark water</Button><Button onClick={() => {setMode('bunker');setShowArt(false);}}>Mark bunker</Button><Button onClick={() => {setMode('remove');setShowArt(false);}}>Remove hazard</Button></details>
+        </div></details>
+        <Button onClick={() => setLogging(true)}>Log a measured carry</Button>
+        {round ? <ScoreStep key={"score:"+key} suggestedStrokes={playing.shot-1} round={round} hole={hole} last={index>=holes.length-1} onNext={() => setIndex(index+1)}/> : <Button onClick={() => go('score')}>Start a scored round</Button>}
+      </aside>
     </div>
-  );
+    {finderSheet}<HoleEditor hole={hole} open={editing} onClose={() => setEditing(false)}/>
+    <Sheet title="Log distance for club learning" open={logging} onClose={() => setLogging(false)}><p>This records distance only. Use “Shot played” once after each stroke to advance the shot count.</p><ShotLogger key={key} hole={hole}/></Sheet>
+  </div>;
 }

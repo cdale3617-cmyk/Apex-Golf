@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
-import type { Dir } from "./geo";
+import type { Dir, Pt } from "./geo";
+import { nextShot, playingKey, type PlayingState } from "./round-state";
 
 // Everything the app knows is kept on the phone, in its own storage. No server.
 
@@ -11,21 +12,21 @@ export interface Shape { path: XY[]; green: XY[] | null; fairways: XY[][]; bunke
 export interface Hole {
   id: string; courseId: string; number: number; par: number; handicap: number;
   centerM: number; frontM: number; backM: number;
-  windKmh: number; windDir: Dir; tempC: number; elevationM: number; bearing: number | null; shape?: Shape | null;
+  windKmh: number; windDir: Dir; tempC: number; elevationM: number; bearing: number | null; shape?: Shape | null; tee?: Pt; mapBearing?: number; edgesEstimated?: boolean; weatherAt?: number; slopeKnown?: boolean;
 }
 export interface Club { id: string; name: string; type: ClubType; loft: number; carryM: number; totalM: number }
 export interface Round { id: string; courseId: string; date: string; status: "In progress" | "Complete" }
 export interface HoleScore { id: string; roundId: string; holeNumber: number; strokes: number; putts: number; fairwayHit: boolean }
-export interface Shot { id: string; clubId: string | null; clubName: string | null; carryM: number; direction: "Left" | "Straight" | "Right"; lie: string; holeId: string | null; createdAt: string }
+export interface Shot { measurement?: "carry" | "total"; roundId?: string | null; shotNumber?: number; id: string; clubId: string | null; clubName: string | null; carryM: number; direction: "Left" | "Straight" | "Right"; lie: string; holeId: string | null; createdAt: string }
 export interface Conversion { id: string; title: string; courseId: string | null; holeNumber: number | null; style: string; createdAt: string; photo: string }
 export interface Profile { name: string; handicap: number | null; handedness: "Right" | "Left"; typicalMiss: string; notes: string }
 export interface State {
-  courses: Course[]; holes: Hole[]; clubs: Club[]; rounds: Round[]; scores: HoleScore[]; shots: Shot[]; conversions: Conversion[]; profile: Profile | null;
+  playing: Record<string, PlayingState>; courses: Course[]; holes: Hole[]; clubs: Club[]; rounds: Round[]; scores: HoleScore[]; shots: Shot[]; conversions: Conversion[]; profile: Profile | null;
 }
 
 const KEY = "apex.data.v1";
 const PKEY = "apex.photos.v1";
-const empty: State = { courses: [], holes: [], clubs: [], rounds: [], scores: [], shots: [], conversions: [], profile: null };
+const empty: State = { playing: {}, courses: [], holes: [], clubs: [], rounds: [], scores: [], shots: [], conversions: [], profile: null };
 
 function load(): State {
   try {
@@ -74,6 +75,13 @@ export function useData(): State {
 }
 
 export const actions = {
+  setPlaying(p: PlayingState) {
+    update((s) => ({ ...s, playing: { ...s.playing, [playingKey(p.holeId, p.roundId)]: p } }));
+  },
+  recordStroke(p: PlayingState) {
+    const current = state.playing[playingKey(p.holeId, p.roundId)] ?? p;
+    actions.setPlaying(nextShot(current));
+  },
   addCourse(c: Omit<Course, "id" | "wxAt">, holes: Omit<Hole, "id" | "courseId">[]): string {
     const id = uid();
     update((s) => ({
@@ -88,6 +96,7 @@ export const actions = {
       const gone = new Set(s.rounds.filter((r) => r.courseId === id).map((r) => r.id));
       return {
         ...s,
+        playing: Object.fromEntries(Object.entries(s.playing).filter(([, p]) => !s.holes.some((h) => h.courseId === id && h.id === p.holeId))),
         courses: s.courses.filter((c) => c.id !== id),
         holes: s.holes.filter((h) => h.courseId !== id),
         rounds: s.rounds.filter((r) => r.courseId !== id),
@@ -99,10 +108,10 @@ export const actions = {
   setBearings(courseId: string, byNumber: Record<number, number>) {
     update((s) => ({ ...s, holes: s.holes.map((h) => (h.courseId === courseId && byNumber[h.number] !== undefined ? { ...h, bearing: byNumber[h.number] } : h)) }));
   },
-  setShapes(courseId: string, shapes: Record<number, Shape>, bearings: Record<number, number>) {
+  setShapes(courseId: string, shapes: Record<number, Shape>, bearings: Record<number, number>, tees: Record<number, Pt> = {}) {
     update((s) => ({
       ...s,
-      holes: s.holes.map((h) => (h.courseId === courseId ? { ...h, shape: shapes[h.number] ?? h.shape ?? null, bearing: h.bearing ?? bearings[h.number] ?? null } : h)),
+      holes: s.holes.map((h) => (h.courseId === courseId ? { ...h, shape: shapes[h.number] ?? h.shape ?? null, bearing: h.bearing ?? bearings[h.number] ?? null, mapBearing: bearings[h.number] ?? h.mapBearing, tee: tees[h.number] ?? h.tee } : h)),
     }));
   },
   updateHole(id: string, patch: Partial<Hole>) {
@@ -112,7 +121,7 @@ export const actions = {
     update((s) => ({
       ...s,
       courses: s.courses.map((c) => (c.id === courseId ? { ...c, wxAt: Date.now() } : c)),
-      holes: s.holes.map((h) => (h.courseId === courseId ? { ...h, ...w } : h)),
+      holes: s.holes.map((h) => (h.courseId === courseId ? { ...h, ...w, weatherAt: Date.now() } : h)),
     }));
   },
   saveClub(c: Omit<Club, "id"> & { id?: string }) {
@@ -135,7 +144,7 @@ export const actions = {
     update((s) => ({ ...s, rounds: s.rounds.map((r) => (r.id === id ? { ...r, status: "Complete" as const } : r)) }));
   },
   deleteRound(id: string) {
-    update((s) => ({ ...s, rounds: s.rounds.filter((r) => r.id !== id), scores: s.scores.filter((x) => x.roundId !== id) }));
+    update((s) => ({ ...s, playing: Object.fromEntries(Object.entries(s.playing).filter(([, p]) => p.roundId !== id)), rounds: s.rounds.filter((r) => r.id !== id), scores: s.scores.filter((x) => x.roundId !== id) }));
   },
   saveScore(roundId: string, holeNumber: number, v: { strokes: number; putts: number; fairwayHit: boolean }) {
     update((s) => {

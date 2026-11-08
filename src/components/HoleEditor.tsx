@@ -25,6 +25,9 @@ export function HoleEditor({ hole, open, onClose }: { hole: Hole; open: boolean;
     if (!(centerM >= 20)) return toast("Enter the hole length.");
     actions.updateHole(hole.id, {
       centerM,
+      weatherAt: Number(f.wind) !== hole.windKmh || f.dir !== hole.windDir || Number(f.temp) !== hole.tempC ? Date.now() : hole.weatherAt,
+      slopeKnown: hole.slopeKnown || u.fromInput(f.rise) !== hole.elevationM,
+      edgesEstimated: hole.edgesEstimated && u.fromInput(f.front) === hole.frontM && u.fromInput(f.back) === hole.backM,
       frontM: f.front.trim() ? u.fromInput(f.front) : centerM - 10,
       backM: f.back.trim() ? u.fromInput(f.back) : centerM + 10,
       par: Number(f.par) || 4,

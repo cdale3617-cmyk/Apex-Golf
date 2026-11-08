@@ -1,4 +1,5 @@
 import { actions, getState, type Hole, type Shape, type XY } from "./store";
+import { edgeDistance } from "./strategy";
 import { COMPASS, bearing, metres, type Dir, type Pt } from "./geo";
 
 // Courses come from OpenStreetMap (search and hole maps) and Open-Meteo (weather and height).
@@ -8,7 +9,7 @@ export type Hit = { id: string; name: string; location: string; lat: number; lon
 type Way = { tags?: Record<string, string>; geometry?: Pt[] };
 type Box = { south: number; north: number; west: number; east: number };
 type Nom = { osm_type: string; osm_id: number; lat: string; lon: string; name?: string; display_name: string; category?: string; type?: string; boundingbox: string[] };
-type HoleIn = { number: number; par: number | null; handicap: number | null; lengthM: number; frontM: number; backM: number; teeLat: number; teeLon: number; greenLat: number; greenLon: number; bearing: number; shape: Shape };
+type HoleIn = { number: number; par: number | null; handicap: number | null; edgesEstimated: boolean; lengthM: number; frontM: number; backM: number; teeLat: number; teeLon: number; greenLat: number; greenLon: number; bearing: number; shape: Shape };
 
 const MIRRORS = [
   "https://lz4.overpass-api.de/api/interpreter",
@@ -137,7 +138,7 @@ function buildHoles(elements: Way[]): HoleIn[] {
     const handicap = parseInt(w.tags?.handicap ?? w.tags?.["golf:handicap"] ?? "", 10);
     const next: HoleIn = {
       number, par: Number.isFinite(par) ? par : null, handicap: Number.isFinite(handicap) ? handicap : null,
-      lengthM: length, frontM: Math.max(1, front), backM: back,
+      edgesEstimated: !greenRing, lengthM: length, frontM: Math.max(1, front), backM: back,
       teeLat: tee.lat, teeLon: tee.lon, greenLat: end.lat, greenLon: end.lon, bearing: bearing(tee, end), shape: shapeFor(g, elements, greenRing),
     };
     const have = byNumber.get(number);
@@ -164,7 +165,7 @@ export async function fetchWeather(lat: number, lon: number): Promise<Weather | 
 export async function refreshWeather(courseId: string, force = false): Promise<boolean> {
   const c = getState().courses.find((x) => x.id === courseId);
   if (!c || c.lat === null || c.lon === null) return false;
-  if (!force && Date.now() - c.wxAt < 45 * 60 * 1000) return false;
+  if (!force && getState().holes.filter(h => h.courseId === courseId).every(h => h.weatherAt && Date.now() - h.weatherAt < 45 * 60 * 1000)) return false;
   const w = await fetchWeather(c.lat, c.lon);
   if (!w) return false;
   actions.setWeather(courseId, w);
@@ -184,7 +185,7 @@ export async function importCourse(hit: Hit, progress: (m: string) => void): Pro
     actions.setBearings(existing.id, map);
     const shapes: Record<number, Shape> = {};
     holes.forEach((h) => { shapes[h.number] = h.shape; });
-    actions.setShapes(existing.id, shapes, map);
+    actions.setShapes(existing.id, shapes, map, Object.fromEntries(holes.map((h) => [h.number, { lat: h.teeLat, lon: h.teeLon }])));
     return existing.id;
   }
   progress("Found " + holes.length + " holes. Checking weather and slope…");
@@ -201,6 +202,7 @@ export async function importCourse(hit: Hit, progress: (m: string) => void): Pro
   const rows: Omit<Hole, "id" | "courseId">[] = holes.map((h, i) => {
     const rise = elevations.length >= (i + 1) * 2 ? Math.round(elevations[i * 2 + 1] - elevations[i * 2]) : 0;
     return {
+      tee: { lat: h.teeLat, lon: h.teeLon }, mapBearing: h.bearing, edgesEstimated: h.edgesEstimated, weatherAt: w ? Date.now() : undefined, slopeKnown: elevations.length >= (i + 1) * 2,
       number: h.number,
       par: h.par && h.par >= 3 && h.par <= 6 ? h.par : guessPar(h.lengthM),
       handicap: h.handicap ?? 0,
@@ -230,7 +232,7 @@ export async function addManualCourse(name: string, location: string, list: { nu
   const rows: Omit<Hole, "id" | "courseId">[] = holes
     .sort((a, z) => a.number - z.number)
     .map((h) => ({
-      number: h.number, par: h.par, handicap: 0,
+      number: h.number, par: h.par, handicap: 0, edgesEstimated: true, weatherAt: w ? Date.now() : undefined,
       centerM: Math.round(h.lengthM), frontM: Math.round(h.lengthM - 10), backM: Math.round(h.lengthM + 10),
       windKmh: w?.windKmh ?? 0, windDir: w?.windDir ?? "N", tempC: w?.tempC ?? 20, elevationM: 0, bearing: null,
     }));
@@ -272,7 +274,15 @@ function shapeFor(g: Pt[], elements: Way[], greenRing: Pt[] | null): Shape {
       .filter((w) => w.geometry && w.geometry.length > 2 && test(w))
       .map((w) => {
         const poly = (w.geometry as Pt[]).map(local);
-        return { poly, d: Math.min(...poly.map((p) => pathDist(p, full))) };
+        let nearest = Math.min(...poly.map((p) => pathDist(p, full)));
+        for (let i = 1; i < full.length; i++) {
+          const steps = Math.max(1, Math.ceil(Math.hypot(full[i][0]-full[i-1][0], full[i][1]-full[i-1][1])/5));
+          for (let j = 0; j <= steps; j++) {
+            const p: XY = [full[i-1][0] + (full[i][0]-full[i-1][0])*j/steps, full[i-1][1] + (full[i][1]-full[i-1][1])*j/steps];
+            nearest = Math.min(nearest, edgeDistance(p,poly));
+          }
+        }
+        return { poly, d: nearest };
       })
       .filter((x) => x.d <= d)
       .sort((a, z) => a.d - z.d)
@@ -308,7 +318,7 @@ export async function redrawCourse(courseId: string): Promise<boolean> {
       }
     });
     if (!Object.keys(shapes).length) return false;
-    actions.setShapes(courseId, shapes, bears);
+    actions.setShapes(courseId, shapes, bears, Object.fromEntries(found.filter((h) => shapes[h.number]).map((h) => [h.number, { lat: h.teeLat, lon: h.teeLon }])));
     return true;
   } catch {
     return false;

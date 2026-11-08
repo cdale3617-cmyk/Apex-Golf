@@ -1,4 +1,5 @@
 import { Capacitor } from "@capacitor/core";
+import { TextToSpeech } from "@capacitor-community/text-to-speech";
 import { SpeechRecognition } from "@capacitor-community/speech-recognition";
 
 // Talking to the caddie and hearing it back, using the phone's own speech tools.
@@ -29,46 +30,57 @@ function webClass(): (new () => WebRec) | null {
 }
 
 export const canListen = () => isNative() || webClass() !== null;
-export const canSpeak = () => typeof window !== "undefined" && "speechSynthesis" in window;
+export const canSpeak = () => isNative() || (typeof window !== "undefined" && "speechSynthesis" in window);
 
 const language = () => navigator.language || "en-AU";
 
 /** Starts listening. Returns a function that stops it. */
 export function listen(h: { onText: (text: string, final: boolean) => void; onEnd: () => void; onError: (message: string) => void }): () => void {
   if (isNative()) {
-    let ended = false;
-    let last = "";
+    let ended = false, last = '';
+    const handles: { remove: () => Promise<void> }[] = [];
+    let settle = 0;
     const finish = () => {
       if (ended) return;
       ended = true;
-      void native.removeAllListeners().catch(() => undefined);
+      clearTimeout(deadline); clearTimeout(settle);
+      handles.forEach(handle => void handle.remove().catch(() => undefined));
       if (last) h.onText(last, true);
       h.onEnd();
+    };
+    const deadline = window.setTimeout(() => { void native.stop().catch(() => undefined); finish(); }, 25000);
+    const add = async (name: string, fn: (d: any) => void) => {
+      const handle = await native.addListener(name, fn);
+      if (ended) await handle.remove(); else handles.push(handle);
     };
     void (async () => {
       try {
         const avail = await native.available();
-        if (!avail.available) throw new Error("Voice input is not available on this phone.");
+        if (ended) return;
+        if (!avail.available) throw new Error('Voice input is not available on this phone.');
         const perm = await native.requestPermissions();
-        if (perm.speechRecognition && perm.speechRecognition !== "granted") throw new Error("Microphone access is blocked. Allow the microphone for APEX Golf in your phone settings.");
-        await native.removeAllListeners();
-        await native.addListener("partialResults", (d: { matches?: string[] }) => {
-          last = (d.matches && d.matches[0]) || last;
+        if (ended) return;
+        if (perm.speechRecognition !== 'granted') throw new Error('Allow the microphone for APEX Golf in phone settings.');
+        await add('partialResults', (d: { matches?: string[] }) => {
+          if (ended) return;
+          last = d.matches?.[0] || last;
           h.onText(last, false);
         });
-        await native.addListener("listeningState", (d: { status?: string }) => {
-          if (d.status === "stopped") finish();
+        if (ended) return;
+        await add('listeningState', (d: { status?: string }) => {
+          // Android emits stopped before its final words. Give that result time to arrive.
+          if (!ended && d.status === 'stopped') { clearTimeout(settle); settle = window.setTimeout(finish, 1000); }
         });
-        await native.start({ language: language(), maxResults: 1, partialResults: true, popup: false });
+        if (ended) return;
+        const result = await native.start({ language: language(), maxResults: 1, partialResults: true, popup: false });
+        if (!ended && result.matches?.[0]) { last = result.matches[0]; finish(); }
       } catch (e) {
-        h.onError(e instanceof Error ? e.message : "Voice input could not start.");
+        if (ended) return;
+        h.onError(e instanceof Error ? e.message : 'Voice input could not start.');
         finish();
       }
     })();
-    return () => {
-      void native.stop().catch(() => undefined);
-      window.setTimeout(finish, 600);
-    };
+    return () => { if (ended) return; void native.stop().catch(() => undefined); finish(); };
   }
 
   const Rec = webClass();
@@ -95,7 +107,7 @@ export function listen(h: { onText: (text: string, final: boolean) => void; onEn
     h.onError(e.error === "not-allowed" || e.error === "service-not-allowed" ? "Microphone access is blocked." : e.error === "no-speech" ? "I didn't hear anything. Tap the mic and try again." : "Voice input stopped. Tap the mic to try again.");
   };
   rec.onend = h.onEnd;
-  rec.start();
+  try { rec.start(); } catch { h.onError('Voice input could not start. Try again.'); h.onEnd(); }
   return () => rec.stop();
 }
 
@@ -111,6 +123,10 @@ function spoken(text: string) {
 
 export function speak(text: string, onEnd?: () => void) {
   if (!canSpeak()) return;
+  if (isNative()) {
+    void TextToSpeech.speak({ text: spoken(text), lang: 'en-AU', rate: 1.0 }).then(() => onEnd?.()).catch(() => onEnd?.());
+    return;
+  }
   const synth = window.speechSynthesis;
   synth.cancel();
   const u = new SpeechSynthesisUtterance(spoken(text));
@@ -126,5 +142,6 @@ export function speak(text: string, onEnd?: () => void) {
 }
 
 export function stopSpeaking() {
+  if (isNative()) { void TextToSpeech.stop().catch(() => undefined); return; }
   if (canSpeak()) window.speechSynthesis.cancel();
 }

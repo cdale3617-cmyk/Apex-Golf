@@ -14,7 +14,7 @@ export function clubStats(clubs: Club[], shots: Shot[]): ClubStat[] {
   return clubs
     .map((c) => {
       const mine = shots
-        .filter((s) => s.clubId === c.id && s.carryM > 0)
+        .filter((s) => s.clubId === c.id && s.measurement !== "total" && Number.isFinite(s.carryM) && s.carryM > 0 && s.carryM <= 400)
         .sort((a, z) => (a.createdAt < z.createdAt ? 1 : -1))
         .slice(0, 20);
       const n = mine.length;
@@ -51,13 +51,13 @@ export function tendency(s: ClubStat): string {
 /** Pulls a distance, lie or stance out of something typed or said: "150 yards, in the rough, ball above my feet". */
 export function parseNote(note: string, unit: Unit): { distanceM?: number; lie?: string; stance?: string } {
   const out: { distanceM?: number; lie?: string; stance?: string } = {};
-  const said = note.match(/(\d{2,3})\s*(yards?|yds?|metres?|meters?|m)?(?![\d])/i);
+  const said = note.match(/\b(\d{1,3})\s*(yards?|yds?|metres?|meters?|m)\b(?!\s*\/)/i) ?? note.match(/\b(\d{1,3})\s*(?:out|to (?:the )?(?:pin|green)|remaining)\b/i);
   if (said) {
     const n = Number(said[1]);
     const u = (said[2] ?? "").toLowerCase();
     const yards = u ? u.startsWith("y") : unit === "yd";
     const m = yards ? Math.round(n * 0.9144) : n;
-    if (m >= 20 && m <= 600) out.distanceM = m;
+    if (m >= 3 && m <= 700) out.distanceM = m;
   }
   const t = note.toLowerCase();
   if (/green ?side bunker/.test(t)) out.lie = "Greenside bunker";
