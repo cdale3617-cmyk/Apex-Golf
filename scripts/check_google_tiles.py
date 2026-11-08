@@ -13,14 +13,17 @@ key = os.environ.get("GOOGLE_MAPS_API_KEY", "").strip()
 if not key:
     sys.exit("GOOGLE_MAPS_API_KEY repository secret is missing")
 sdk = Path(os.environ.get("ANDROID_HOME", os.environ.get("ANDROID_SDK_ROOT", "/usr/local/lib/android/sdk")))
-signers = sorted(sdk.glob("build-tools/*/apksigner"), reverse=True)
+signers = sorted(sdk.glob("build-tools/*/apksigner"), key=lambda p: (p.parent.name != "35.0.0", p.parent.name))
 if not signers:
     sys.exit("Android APK signature verifier is unavailable")
 result = subprocess.run([
-    str(signers[0]), "verify", "--print-certs", "android/app/build/outputs/apk/debug/app-debug.apk",
+    str(signers[0]), "verify", "--min-sdk-version", "23", "--verbose", "--print-certs", "android/app/build/outputs/apk/debug/app-debug.apk",
 ], capture_output=True, text=True)
 match = re.search(r"Signer #1 certificate SHA-1 digest: ([0-9a-fA-F]{40})", result.stdout)
 if result.returncode or not match:
+    print("APK signature verifier diagnostics:")
+    print(result.stdout)
+    print(result.stderr)
     sys.exit("Could not verify the APK signing certificate")
 sha = match.group(1).upper()
 fingerprint = ":".join(re.findall("..", sha))
