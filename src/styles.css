@@ -168,3 +168,10 @@ details[open] > .stack { padding:6px 0; }
 .map-sources-body .feature-source { margin-top:10px; border-top:1px solid var(--line); padding-top:8px; }
 .marker-controls { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
 .marker-controls span { font-size:.8rem; }
+
+.hole-viewport { position:relative; flex:1; min-height:0; overflow:hidden; touch-action:none; }
+.map .hole-viewport svg { display:block; width:100%; height:100%; }
+.map-zoom-controls { position:absolute; top:8px; right:8px; display:flex; flex-direction:column; align-items:stretch; gap:4px; z-index:2; }
+.map-zoom-controls button { min-width:44px; min-height:44px; padding:4px 8px; border:1px solid var(--line); border-radius:8px; background:var(--surface); color:var(--ink); font-size:1rem; font-weight:700; }
+.map-zoom-controls button:last-of-type { font-size:.7rem; }
+.map-zoom-controls span { align-self:center; padding:2px 5px; background:var(--surface); color:var(--ink); font-size:.7rem; border-radius:5px; }

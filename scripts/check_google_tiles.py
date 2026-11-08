@@ -66,7 +66,8 @@ notes = f"""Google satellite APK for owner testing
 
 Verified a live satellite JPEG and coverage metadata at Yeppoon in CI.
 Google imagery is online only and is not saved or passed to the art converter.
-Move red / green dots, then Save positions to lock them.
+Tap yellow to lock it, then drag the red tee or green centre. Save positions when done.
+Red and green dots are smaller. Zoom buttons and pinch zoom now magnify the hole; drag the background with yellow locked to pan.
 Saved dots update centre distances without moving hazards or the satellite picture.
 Google Maps and Data sources now sit below the hole picture.
 Check the same Yeppoon hole on the S24 before wider course testing.
